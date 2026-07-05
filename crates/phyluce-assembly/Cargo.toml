@@ -1,0 +1,17 @@
+[package]
+name = "phyluce-assembly"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+phyluce-io = { path = "../phyluce-io" }
+phyluce-config = { path = "../phyluce-config" }
+phyluce-external = { path = "../phyluce-external" }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+csv.workspace = true

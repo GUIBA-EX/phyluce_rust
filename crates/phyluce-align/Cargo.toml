@@ -1,0 +1,14 @@
+[package]
+name = "phyluce-align"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+phyluce-io = { path = "../phyluce-io" }
+phyluce-external = { path = "../phyluce-external" }
+phyluce-config = { path = "../phyluce-config" }

@@ -1,0 +1,26 @@
+[package]
+name = "phyluce-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "phyluce"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+regex = { workspace = true }
+csv = { workspace = true }
+phyluce-config = { path = "../phyluce-config" }
+phyluce-io = { path = "../phyluce-io" }
+phyluce-external = { path = "../phyluce-external" }
+phyluce-assembly = { path = "../phyluce-assembly" }
+phyluce-align = { path = "../phyluce-align" }
+phyluce-genetrees = { path = "../phyluce-genetrees" }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true

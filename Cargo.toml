@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/phyluce-config",
+    "crates/phyluce-io",
+    "crates/phyluce-external",
+    "crates/phyluce-assembly",
+    "crates/phyluce-align",
+    "crates/phyluce-genetrees",
+    "crates/phyluce-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+authors = ["phyluce contributors"]
+repository = "https://github.com/faircloth-lab/phyluce"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+flate2 = "1"
+regex = "1"
+csv = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
