@@ -14,6 +14,12 @@
 - `crates/phyluce-genetrees`：gene tree 相关辅助逻辑。
 - `tests/compat`：兼容性和回归测试脚本。
 
+## 用户手册
+
+中文用户手册见 [docs/user-manual-zh.md](docs/user-manual-zh.md)。手册按原版
+`phyluce_*` 脚本的使用方式组织，包含安装配置、UCE 主流程、各命令域示例、
+旧脚本名兼容、已知差异和故障排查。
+
 ## CLI 形式
 
 Rust 版本使用一个分组式 CLI：
