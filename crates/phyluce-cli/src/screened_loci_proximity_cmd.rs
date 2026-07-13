@@ -88,7 +88,7 @@ pub fn run(input: &Path, output: &Path, distance: i64, regex_str: &str) -> anyho
         .map(|p| p.0)
         .collect::<HashSet<_>>()
         .len();
-    eprintln!("Start with {loci_count} loci and {starting_baits} baits");
+    crate::cli_warn!("Start with {loci_count} loci and {starting_baits} baits");
 
     let positions: Vec<(i64, String, i64, i64)> = positions_set.into_iter().collect();
     let clusters = cluster_loci(&positions, distance);
@@ -103,7 +103,7 @@ pub fn run(input: &Path, output: &Path, distance: i64, regex_str: &str) -> anyho
             bad.extend(loci.into_iter().skip(1));
         }
     }
-    eprintln!(
+    crate::cli_warn!(
         "Removing {} loci that appear to be within {distance} bp of one another",
         bad.len()
     );
@@ -123,7 +123,7 @@ pub fn run(input: &Path, output: &Path, distance: i64, regex_str: &str) -> anyho
             kept_loci.insert(locus);
         }
     }
-    eprintln!("Ends with {} loci and {kept_baits} baits", kept_loci.len());
+    crate::cli_warn!("Ends with {} loci and {kept_baits} baits", kept_loci.len());
     Ok(())
 }
 

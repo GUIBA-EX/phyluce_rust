@@ -34,7 +34,7 @@ phyluce <domain> <command> [options]
 phyluce align convert-degen-bases --alignments in --output out
 ```
 
-当前这批 align/assembly 命令也支持旧脚本名兼容：如果通过旧脚本名的
+全部原版命令均支持旧脚本名兼容：如果通过旧脚本名的
 symlink 或复制后的可执行文件调用，会自动映射到新的分组命令。例如
 `phyluce_align_convert_degen_bases` 会映射为：
 
@@ -56,7 +56,7 @@ phyluce align convert-degen-bases
   `stockholm` 静默当作 FASTA 处理。
 - 新增 `phyluce-io::sql`，集中处理 SQL 标识符转义，并替换相关动态表名、
   列名拼接。
-- 新增旧命令名兼容层，方便现有命令调用方式逐步迁移。
+- 新增覆盖 74 个原版可执行脚本的旧命令名兼容层。
 - 新增基于 `tracing` 的可选文件日志：全局参数 `--log-path` 和
   `--verbosity`。默认不写日志，不改变 stdout/stderr。
 - 扩展兼容性测试，优先使用已有 fixture，随机、外部工具或历史兼容问题路径
@@ -67,8 +67,13 @@ phyluce align convert-degen-bases
 - `match-contigs-to-barcodes` 不执行 BOLD 网络查询；需要本地 LASTZ slicing
   时请传入 `--no-bold`。
 - 依赖外部工具的命令仍需要正确配置 MAFFT、LASTZ、RAxML 等路径。
+- `reconstruct-uce-from-probe` 的多 probe 路径默认使用 MAFFT；需要原版
+  MUSCLE 3/Clustal 路径时传入 `--muscle-binary`。
 - 少数历史脚本存在运行时兼容性问题；Rust 版本按预期行为实现，而不是复现
   运行时失败。
+- `merge-multiple-gzip-files --trimmed`、`rename-tree-leaves --reroot`、部分
+  alignment 输出格式尚未移植。对应选项会明确报错，不能作为
+  原版脚本的无条件替换。
 
 ## 开发检查
 
@@ -84,9 +89,9 @@ cargo build -p phyluce-cli
 兼容性测试：
 
 ```text
-python3 tests/compat/compare_align_assembly_batch2.py target/debug/phyluce
-python3 tests/compat/run_all.py target/debug/phyluce
+python3 tests/compat/run_fixtures.py target/debug/phyluce
 ```
 
-`run_all.py` 会调用 MAFFT 等外部工具；在受限 sandbox 中可能需要在非 sandbox
-环境运行。
+该命令只使用仓库内 fixture，可在独立克隆中运行。执行包含原版 Python 和外部
+工具的完整对照时，设置 `PHYLUCE_PYTHON_REPO=/path/to/phyluce` 后运行
+`python3 tests/compat/run_all.py target/debug/phyluce`。

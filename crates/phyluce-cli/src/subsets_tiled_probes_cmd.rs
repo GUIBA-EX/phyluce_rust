@@ -42,13 +42,13 @@ pub fn run(probes: &Path, taxa: &[String], output: &Path, regex_str: &str) -> an
         }
     }
 
-    println!("All probes = {}", taxa_counts.values().sum::<usize>());
-    println!("--- Probes by taxon ---");
+    crate::cli_info!("All probes = {}", taxa_counts.values().sum::<usize>());
+    crate::cli_info!("--- Probes by taxon ---");
     for (taxon, count) in &taxa_counts {
-        println!("{taxon}\t{count}");
+        crate::cli_info!("{taxon}\t{count}");
     }
-    println!("--- Post  filtering ---");
-    println!("Conserved locus count = {}", kept_loci.len());
-    println!("Probe Count = {probes_kept}");
+    crate::cli_info!("--- Post  filtering ---");
+    crate::cli_info!("Conserved locus count = {}", kept_loci.len());
+    crate::cli_info!("Probe Count = {probes_kept}");
     Ok(())
 }

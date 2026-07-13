@@ -15,7 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from common import find_python_repo
+REPO_ROOT = find_python_repo()
 PY_SCRIPT = REPO_ROOT / "bin/assembly/phyluce_assembly_get_fastq_lengths"
 FLOAT_TOL = 1e-6
 

@@ -20,7 +20,7 @@ pub fn run_get(fastas_dir: &Path, output: &Path, base_taxon: &str) -> anyhow::Re
 
     let mut organisms = Vec::new();
     let mut conserved: HashMap<String, Vec<String>> = HashMap::new();
-    println!("Reading Fasta files...");
+    crate::cli_info!("Reading Fasta files...");
     for fasta in &fasta_files {
         let taxon_name = fasta
             .file_stem()
@@ -86,6 +86,10 @@ pub fn run_query(
     let columns: Vec<String> = stmt
         .query_map([], |r| r.get::<_, String>(1))?
         .collect::<Result<_, _>>()?;
+    anyhow::ensure!(
+        columns.len() >= 2 && columns.first().is_some_and(|name| name == "locus"),
+        "database table {base_taxon:?} must contain a 'locus' column and at least one taxon column"
+    );
     let taxa = &columns[1..];
 
     let mut stmt = conn.prepare(&format!("SELECT * FROM {table}"))?;
@@ -133,8 +137,8 @@ pub fn run_query(
                 writeln!(out2, "{locus}\t{sum}\t{joined}")?;
             }
         }
-        println!("{counter:?}");
-        println!("Total loci = {total_loci}");
+        crate::cli_info!("{counter:?}");
+        crate::cli_info!("Total loci = {total_loci}");
     } else {
         let mut counts = vec![0usize; taxa.len() + 1];
         let mut rows = stmt.query([])?;
@@ -147,7 +151,7 @@ pub fn run_query(
         }
         for i in 0..=taxa.len() {
             let total: usize = counts[i..].iter().sum();
-            println!("Loci shared by {i} taxa:\t{total}");
+            crate::cli_info!("Loci shared by {i} taxa:\t{total}");
         }
     }
     Ok(())

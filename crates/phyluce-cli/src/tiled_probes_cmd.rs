@@ -46,6 +46,15 @@ fn middle_overlapper(seq_len: usize, length: usize, density: f64) -> Vec<(i64, i
     coords
 }
 
+fn validate_tiling(length: usize, density: f64) -> anyhow::Result<()> {
+    anyhow::ensure!(length > 0, "--probe-length must be greater than zero");
+    anyhow::ensure!(
+        density.is_finite() && density > 0.0 && density <= length as f64,
+        "--tiling-density must be finite, greater than zero, and no greater than --probe-length"
+    );
+    Ok(())
+}
+
 /// Python 3's `round()` uses banker's rounding (round-half-to-even).
 fn python_round(x: f64) -> i64 {
     let floor = x.floor();
@@ -97,6 +106,7 @@ pub fn run(
     locus_bed: Option<&Path>,
     args: &TiledProbesArgs,
 ) -> anyhow::Result<()> {
+    validate_tiling(args.length, args.density)?;
     let records = phyluce_io::read_fasta(input)?;
 
     let mut probe_set: Vec<Vec<Probe>> = Vec::new();
@@ -179,8 +189,8 @@ pub fn run(
 
     let cons_count = probe_set.len();
     let probe_count: usize = probe_set.iter().map(|p| p.len()).sum();
-    eprintln!("Conserved locus count = {cons_count}");
-    eprintln!("Probe Count = {probe_count}");
+    crate::cli_warn!("Conserved locus count = {cons_count}");
+    crate::cli_warn!("Probe Count = {probe_count}");
 
     let mut outp = std::fs::File::create(output)?;
     let mut outpb = probe_bed.map(std::fs::File::create).transpose()?;
@@ -221,4 +231,18 @@ pub fn run(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_non_progressing_tiling_parameters() {
+        assert!(validate_tiling(0, 2.0).is_err());
+        assert!(validate_tiling(120, 0.0).is_err());
+        assert!(validate_tiling(120, f64::INFINITY).is_err());
+        assert!(validate_tiling(120, 121.0).is_err());
+        assert!(validate_tiling(120, 2.0).is_ok());
+    }
 }

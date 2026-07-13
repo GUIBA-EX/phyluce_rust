@@ -13,7 +13,7 @@ pub fn run(probes: &Path, config: &Path, output: &Path) -> anyhow::Result<()> {
         .get("exclude")
         .map(|entries| entries.iter().map(|(k, _)| k.clone()).collect())
         .unwrap_or_default();
-    println!("There are {} loci to exclude", excludes.len());
+    crate::cli_info!("There are {} loci to exclude", excludes.len());
 
     let records = read_fasta(probes)?;
     let mut kept_loci = HashSet::new();
@@ -33,7 +33,7 @@ pub fn run(probes: &Path, config: &Path, output: &Path) -> anyhow::Result<()> {
             dropped_loci.insert(locus);
         }
     }
-    println!("Kept {} loci", kept_loci.len());
-    println!("Dropped {} loci", dropped_loci.len());
+    crate::cli_info!("Kept {} loci", kept_loci.len());
+    crate::cli_info!("Dropped {} loci", dropped_loci.len());
     Ok(())
 }

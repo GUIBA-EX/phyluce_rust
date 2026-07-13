@@ -11,6 +11,7 @@ pub fn run(
     output_prefix: &str,
     output_suffix: &str,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(chunk_size > 0, "--chunk-size must be greater than zero");
     let records = read_fasta(input)?;
     for (i, batch) in records.chunks(chunk_size).enumerate() {
         let filename = format!("{output_prefix}_{}.{output_suffix}", i + 1);
@@ -18,7 +19,7 @@ pub fn run(
         for record in batch {
             write_fasta_record(&mut out, &record.description, &record.sequence)?;
         }
-        println!("Wrote {} records to {filename}", batch.len());
+        crate::cli_info!("Wrote {} records to {filename}", batch.len());
     }
     Ok(())
 }

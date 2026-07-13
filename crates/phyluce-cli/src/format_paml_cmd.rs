@@ -13,17 +13,20 @@ use std::path::Path;
 
 use phyluce_align::Alignment;
 
+type PartitionRange = (usize, usize);
+type Partition = (String, Vec<PartitionRange>);
+
 fn parse_relaxed_phylip(text: &str) -> anyhow::Result<Alignment> {
     let mut lines = text.lines();
     let header = lines
         .next()
         .ok_or_else(|| anyhow::anyhow!("empty phylip file"))?;
     let mut parts = header.split_whitespace();
-    let _ntax: usize = parts
+    let ntax: usize = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("bad phylip header"))?
         .parse()?;
-    let _nchar: usize = parts
+    let nchar: usize = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("bad phylip header"))?
         .parse()?;
@@ -40,7 +43,19 @@ fn parse_relaxed_phylip(text: &str) -> anyhow::Result<Alignment> {
             seq: seq.into_bytes(),
         });
     }
-    Ok(Alignment { rows })
+    let alignment = Alignment { rows };
+    alignment.validate()?;
+    anyhow::ensure!(
+        alignment.ntax() == ntax,
+        "PHYLIP header declares {ntax} taxa but {} were read",
+        alignment.ntax()
+    );
+    anyhow::ensure!(
+        alignment.nchar() == nchar,
+        "PHYLIP header declares {nchar} characters but {} were read",
+        alignment.nchar()
+    );
+    Ok(alignment)
 }
 
 fn slice_columns(alignment: &Alignment, start: usize, stop: usize) -> Alignment {
@@ -91,33 +106,55 @@ fn write_relaxed_phylip(
     Ok(())
 }
 
+fn parse_partitions(config_text: &str, nchar: usize) -> anyhow::Result<Vec<Partition>> {
+    let mut partitions = Vec::new();
+    for line in config_text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (_, rhs) = line
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("invalid partition line {line:?}"))?;
+        let mut coordinates = Vec::new();
+        for segment in rhs.split(',').map(str::trim) {
+            let (start, stop) = segment
+                .split_once('-')
+                .ok_or_else(|| anyhow::anyhow!("invalid partition range {segment:?}"))?;
+            let start: usize = start
+                .trim()
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid partition start {start:?}"))?;
+            let stop: usize = stop
+                .trim()
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid partition stop {stop:?}"))?;
+            anyhow::ensure!(
+                start >= 1 && start <= stop && stop <= nchar,
+                "partition range {start}-{stop} is outside 1-{}",
+                nchar
+            );
+            coordinates.push((start, stop));
+        }
+        anyhow::ensure!(
+            !coordinates.is_empty(),
+            "partition line has no ranges: {line:?}"
+        );
+        partitions.push((line.to_string(), coordinates));
+    }
+    Ok(partitions)
+}
+
 pub fn run(phylip_alignment: &Path, config: &Path, output: &Path) -> anyhow::Result<()> {
     let aln = parse_relaxed_phylip(&std::fs::read_to_string(phylip_alignment)?)?;
     let config_text = std::fs::read_to_string(config)?;
+    let partitions = parse_partitions(&config_text, aln.nchar())?;
 
     let mut out = std::fs::File::create(output)?;
-    for line in config_text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Some((_, rhs)) = line.split_once('=') else {
-            continue;
-        };
-        let segments: Vec<&str> = rhs.split(',').map(|s| s.trim()).collect();
-        let coordinates: Vec<(usize, usize)> = segments
-            .iter()
-            .map(|seg| {
-                let mut it = seg.split('-');
-                let a: usize = it.next().unwrap_or("1").parse().unwrap_or(1);
-                let b: usize = it.next().unwrap_or("1").parse().unwrap_or(1);
-                (a, b)
-            })
-            .collect();
-
+    for (line, coordinates) in partitions {
         let mut new_align: Option<Alignment> = None;
-        for (a, b) in &coordinates {
-            let slice = slice_columns(&aln, a - 1, *b);
+        for (start, stop) in coordinates {
+            let slice = slice_columns(&aln, start - 1, stop);
             match &mut new_align {
                 None => new_align = Some(slice),
                 Some(existing) => append_columns(existing, &slice),
@@ -126,8 +163,28 @@ pub fn run(phylip_alignment: &Path, config: &Path, output: &Path) -> anyhow::Res
         if let Some(partition) = new_align {
             write_relaxed_phylip(&mut out, &partition)?;
             writeln!(out)?;
-            println!("Writing partition {line}");
+            crate::cli_info!("Writing partition {line}");
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_phylip_dimension_mismatches() {
+        assert!(parse_relaxed_phylip("2 4\na AAAA\n").is_err());
+        assert!(parse_relaxed_phylip("2 4\na AAAA\nb AAA\n").is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_partition_coordinates() {
+        assert!(parse_partitions("DNA, p1 = 0-4", 4).is_err());
+        assert!(parse_partitions("DNA, p1 = 3-2", 4).is_err());
+        assert!(parse_partitions("DNA, p1 = 1-5", 4).is_err());
+        assert!(parse_partitions("DNA, p1 = 1", 4).is_err());
+        assert!(parse_partitions("DNA, p1 = 1-2, 4-4", 4).is_ok());
+    }
 }

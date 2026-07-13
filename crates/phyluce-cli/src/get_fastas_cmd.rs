@@ -34,15 +34,15 @@ pub fn run(
         .get("Loci")
         .cloned()
         .context("no [Loci] section in --match-count-output")?;
-    println!(
+    crate::cli_info!(
         "There are {} taxa in the match-count-config file named {}",
         organisms.len(),
         match_count_output.display()
     );
     if incomplete_matrix_out.is_some() {
-        println!("There are {} UCE loci in an INCOMPLETE matrix", uces.len());
+        crate::cli_info!("There are {} UCE loci in an INCOMPLETE matrix", uces.len());
     } else {
-        println!(
+        crate::cli_info!(
             "There are {} shared UCE loci in a COMPLETE matrix",
             uces.len()
         );
@@ -51,8 +51,8 @@ pub fn run(
     let conn = Connection::open(locus_db)?;
     if let Some(extend) = &extend_locus_db {
         conn.execute(
-            &format!("ATTACH DATABASE '{}' AS extended", extend.display()),
-            [],
+            "ATTACH DATABASE ?1 AS extended",
+            [extend.to_string_lossy().as_ref()],
         )?;
     }
 
@@ -72,7 +72,7 @@ pub fn run(
     let uces_all: HashSet<String> = uces.iter().cloned().collect();
 
     for organism in &organisms {
-        println!("Getting UCE loci for {organism}");
+        crate::cli_info!("Getting UCE loci for {organism}");
         let name = organism.replace('_', "-");
         let is_extended = name.ends_with('*');
 
@@ -101,8 +101,8 @@ pub fn run(
             );
         };
 
-        println!("There are {} UCE loci for {organism}", node_dict.len());
-        println!("Parsing and renaming contigs for {organism}");
+        crate::cli_info!("There are {} UCE loci for {organism}", node_dict.len());
+        crate::cli_info!("Parsing and renaming contigs for {organism}");
 
         let node_dict_set: HashSet<&String> = node_dict.keys().collect();
         let mut nodes_written: HashSet<String> = HashSet::new();
@@ -132,13 +132,13 @@ pub fn run(
         }
 
         if n_replace_count > 0 {
-            println!(
+            crate::cli_info!(
                 "Replaced <20 ambiguous bases (N) in {n_replace_count} contigs for {organism}"
             );
         }
 
         if let (Some(w), false) = (incomplete_writer.as_mut(), missing.is_empty()) {
-            println!(
+            crate::cli_info!(
                 "Writing missing locus information to {}",
                 incomplete_matrix_out.as_ref().unwrap().display()
             );

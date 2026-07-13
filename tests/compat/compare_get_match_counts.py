@@ -15,7 +15,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from common import RUST_ROOT, find_fixture_repo
+REPO_ROOT = find_fixture_repo()
 LOCUS_DB = REPO_ROOT / "phyluce/tests/test-expected/probe-match/probe.matches.sqlite"
 TAXON_CONFIG = REPO_ROOT / "phyluce/tests/test-conf/taxon-set.conf"
 EXPECTED_COMPLETE = REPO_ROOT / "phyluce/tests/test-expected/taxon-set.complete.conf"
@@ -38,7 +39,7 @@ def run_rust(rust_bin: Path, output: Path, incomplete: bool):
 
 def main():
     rust_bin = Path(
-        sys.argv[1] if len(sys.argv) > 1 else REPO_ROOT / "rust/target/debug/phyluce"
+        sys.argv[1] if len(sys.argv) > 1 else RUST_ROOT / "target/debug/phyluce"
     )
     if not rust_bin.is_file():
         print(f"Rust binary not found at {rust_bin}", file=sys.stderr)

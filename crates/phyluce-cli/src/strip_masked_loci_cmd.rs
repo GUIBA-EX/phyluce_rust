@@ -45,7 +45,7 @@ pub fn run(
         }
     }
 
-    eprintln!(
+    crate::cli_warn!(
         "Screened {} sequences from {}.  Filtered {filtered} with > {}% masked bases or > {max_n} N-bases or < {min_length} length. Kept {kept}.",
         cnt + 1,
         bed.file_name().and_then(|s| s.to_str()).unwrap_or(""),

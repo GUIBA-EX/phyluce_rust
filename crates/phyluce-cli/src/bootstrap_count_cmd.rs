@@ -57,7 +57,7 @@ pub fn run(
         }
     }
     loci.sort();
-    println!("Processing {} alignments", loci.len());
+    crate::cli_info!("Processing {} alignments", loci.len());
 
     let mut rng = SimpleRng::new();
     let replicates: Vec<Vec<String>> = (0..bootreps)

@@ -31,6 +31,10 @@ pub enum NewickError {
         pos: usize,
         found: Option<char>,
     },
+    #[error("unterminated quoted label at character {pos}")]
+    UnterminatedQuotedLabel { pos: usize },
+    #[error("invalid branch length {value:?} at character {pos}")]
+    InvalidBranchLength { value: String, pos: usize },
 }
 
 struct Parser<'a> {
@@ -78,9 +82,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_label(&mut self) -> Option<String> {
+    fn parse_label(&mut self) -> Result<Option<String>, NewickError> {
         self.skip_ws();
         if self.peek() == Some('\'') {
+            let start = self.pos;
             self.advance();
             let mut s = String::new();
             while let Some(c) = self.advance() {
@@ -90,11 +95,11 @@ impl<'a> Parser<'a> {
                         self.advance();
                         continue;
                     }
-                    break;
+                    return Ok(Some(s));
                 }
                 s.push(c);
             }
-            return Some(s);
+            return Err(NewickError::UnterminatedQuotedLabel { pos: start });
         }
         let mut s = String::new();
         while let Some(c) = self.peek() {
@@ -105,19 +110,20 @@ impl<'a> Parser<'a> {
             self.pos += 1;
         }
         if s.is_empty() {
-            None
+            Ok(None)
         } else {
-            Some(s)
+            Ok(Some(s))
         }
     }
 
-    fn parse_branch_length(&mut self) -> Option<f64> {
+    fn parse_branch_length(&mut self) -> Result<Option<f64>, NewickError> {
         self.skip_ws();
         if self.peek() != Some(':') {
-            return None;
+            return Ok(None);
         }
         self.advance();
         self.skip_ws();
+        let start = self.pos;
         let mut s = String::new();
         while let Some(c) = self.peek() {
             if c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E' {
@@ -127,7 +133,19 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        s.parse::<f64>().ok()
+        let value = s
+            .parse::<f64>()
+            .map_err(|_| NewickError::InvalidBranchLength {
+                value: s,
+                pos: start,
+            })?;
+        if !value.is_finite() {
+            return Err(NewickError::InvalidBranchLength {
+                value: value.to_string(),
+                pos: start,
+            });
+        }
+        Ok(Some(value))
     }
 
     fn parse_subtree(&mut self) -> Result<Node, NewickError> {
@@ -146,8 +164,8 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        let label = self.parse_label();
-        let branch_length = self.parse_branch_length();
+        let label = self.parse_label()?;
+        let branch_length = self.parse_branch_length()?;
         Ok(Node {
             label,
             branch_length,
@@ -156,25 +174,35 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// Parse a single Newick tree (terminated by `;`, which is consumed if
-/// present).
+/// Parse exactly one semicolon-terminated Newick tree.
 pub fn parse(text: &str) -> Result<Node, NewickError> {
-    let mut p = Parser::new(text.trim());
+    let mut p = Parser::new(text);
     let node = p.parse_subtree()?;
+    p.expect(';')?;
     p.skip_ws();
-    if p.peek() == Some(';') {
-        p.advance();
+    if p.peek().is_some() {
+        return Err(NewickError::Expected {
+            expected: ';',
+            pos: p.pos,
+            found: p.peek(),
+        });
     }
     Ok(node)
 }
 
 /// Parse every semicolon-terminated tree in a multi-line/multi-tree file.
 pub fn parse_all(text: &str) -> Result<Vec<Node>, NewickError> {
-    text.split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| parse(&format!("{s};")))
-        .collect()
+    let mut parser = Parser::new(text);
+    let mut trees = Vec::new();
+    loop {
+        parser.skip_ws();
+        if parser.peek().is_none() {
+            return Ok(trees);
+        }
+        let tree = parser.parse_subtree()?;
+        parser.expect(';')?;
+        trees.push(tree);
+    }
 }
 
 fn write_node(node: &Node, out: &mut String) {
@@ -189,11 +217,25 @@ fn write_node(node: &Node, out: &mut String) {
         out.push(')');
     }
     if let Some(label) = &node.label {
-        out.push_str(label);
+        write_label(label, out);
     }
     if let Some(bl) = node.branch_length {
         out.push(':');
         out.push_str(&format!("{bl}"));
+    }
+}
+
+fn write_label(label: &str, out: &mut String) {
+    let needs_quotes = label.is_empty()
+        || label
+            .chars()
+            .any(|c| c.is_whitespace() || "(),:;[]'".contains(c));
+    if needs_quotes {
+        out.push('\'');
+        out.push_str(&label.replace('\'', "''"));
+        out.push('\'');
+    } else {
+        out.push_str(label);
     }
 }
 
@@ -348,5 +390,31 @@ mod tests {
             bipartitions_polarized_by(&t1, "d"),
             bipartitions_polarized_by(&t2, "d")
         );
+    }
+
+    #[test]
+    fn rejects_trailing_input_and_unterminated_quotes() {
+        assert!(parse("(a,b); trailing").is_err());
+        assert!(parse("('a,b);").is_err());
+        assert!(parse("(a,b):;").is_err());
+        assert!(parse("(a,b):not-a-number;").is_err());
+    }
+
+    #[test]
+    fn parses_multiple_trees_with_semicolons_in_quoted_labels() {
+        let trees = parse_all("('a;b',c);(d,e);").unwrap();
+        assert_eq!(trees.len(), 2);
+        assert_eq!(
+            leaves(&trees[0]),
+            BTreeSet::from(["a;b".to_string(), "c".to_string()])
+        );
+    }
+
+    #[test]
+    fn writer_quotes_labels_that_require_escaping() {
+        let tree = parse("('a b','c;d','e''f');").unwrap();
+        let text = write(&tree);
+        assert_eq!(text, "('a b','c;d','e''f');");
+        assert_eq!(parse(&text).unwrap(), tree);
     }
 }

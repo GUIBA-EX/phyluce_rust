@@ -20,6 +20,16 @@ fn collect_support_values(node: &Node, out: &mut Vec<f64>) {
     }
 }
 
+fn support_values(tree: &Node, locus: &str) -> anyhow::Result<Vec<f64>> {
+    let mut support = Vec::new();
+    collect_support_values(tree, &mut support);
+    anyhow::ensure!(
+        !support.is_empty(),
+        "tree for locus {locus:?} has no numeric bootstrap support values"
+    );
+    Ok(support)
+}
+
 fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
 }
@@ -49,17 +59,34 @@ pub fn run(trees_dir: &Path, config: &Path) -> anyhow::Result<()> {
             let tree_path = trees_dir.join(locus).join("RAxML_bipartitions.FINAL");
             let text = std::fs::read_to_string(&tree_path)?;
             let tree = parse(&text)?;
-            let mut support = Vec::new();
-            collect_support_values(&tree, &mut support);
+            let support = support_values(&tree, locus)?;
             section_means.push(mean(&support));
         }
+        anyhow::ensure!(
+            !section_means.is_empty(),
+            "section {section:?} contains no loci"
+        );
         let section_mean = mean(&section_means);
         let ci = ci95(&section_means);
-        println!("{section},{},{section_mean},{ci}", section_means.len());
+        crate::cli_info!("{section},{},{section_mean},{ci}", section_means.len());
         for value in &section_means {
             out.push_str(&format!("{section},{value}\n"));
         }
     }
     std::fs::write("outfile.csv", out)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_trees_without_numeric_support() {
+        let unsupported = parse("((a,b),(c,d));").unwrap();
+        assert!(support_values(&unsupported, "uce-1").is_err());
+
+        let supported = parse("((a,b)95,(c,d)87);").unwrap();
+        assert_eq!(support_values(&supported, "uce-1").unwrap(), [95.0, 87.0]);
+    }
 }

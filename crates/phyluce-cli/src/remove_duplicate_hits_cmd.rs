@@ -80,7 +80,7 @@ pub fn run(
             fasta_kept += 1;
         }
     }
-    eprintln!(
+    crate::cli_warn!(
         "Screened {} fasta sequences.  Filtered {} duplicates. Kept {fasta_kept}.",
         records.len(),
         dupes.len()
@@ -106,7 +106,7 @@ pub fn run(
                 kept += 1;
             }
         }
-        eprintln!(
+        crate::cli_warn!(
             "Screened {count} BED probe sequences.  Filtered {} duplicates. Kept {kept}.",
             dupes.len()
         );
@@ -132,7 +132,7 @@ pub fn run(
                 kept += 1;
             }
         }
-        eprintln!(
+        crate::cli_warn!(
             "Screened {count} BED locus sequences.  Filtered {} duplicates. Kept {kept}.",
             dupes.len()
         );

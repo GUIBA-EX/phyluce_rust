@@ -8,7 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from common import RUST_ROOT, find_fixture_repo
+REPO_ROOT = find_fixture_repo()
 INPUT_FASTA = REPO_ROOT / "phyluce/tests/test-expected/taxon-set.complete.fasta"
 EXPECTED_BY_LOCUS = REPO_ROOT / "phyluce/tests/test-expected/exploded-by-locus"
 EXPECTED_BY_TAXON = REPO_ROOT / "phyluce/tests/test-expected/exploded-by-taxa"
@@ -41,7 +42,7 @@ def compare_dirs(expected_dir: Path, actual_dir: Path):
 
 def main():
     rust_bin = Path(
-        sys.argv[1] if len(sys.argv) > 1 else REPO_ROOT / "rust/target/debug/phyluce"
+        sys.argv[1] if len(sys.argv) > 1 else RUST_ROOT / "target/debug/phyluce"
     )
     if not rust_bin.is_file():
         print(f"Rust binary not found at {rust_bin}", file=sys.stderr)

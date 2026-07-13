@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_align::nexus::format_nexus;
 use phyluce_config::PhyluceConfig;
 use phyluce_io::read_fasta;
@@ -43,18 +44,21 @@ pub fn run(
             .arg(&trimmed_path)
             .arg("-automated1")
             .arg("-fasta")
-            .output();
-        let _ = output;
+            .output()
+            .with_context(|| format!("running trimAl for locus {name}"))?;
+        anyhow::ensure!(
+            output.status.success(),
+            "trimAl failed for locus {name}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
 
         if !trimmed_path.is_file() {
-            eprintln!("Missing information for locus {name}");
-            print!(".");
-            continue;
+            anyhow::bail!("trimAl did not create output for locus {name}");
         }
         let records = read_fasta(&trimmed_path)?;
         std::fs::remove_file(&trimmed_path)?;
         if records.is_empty() {
-            eprintln!("Missing information for locus {name}");
+            crate::cli_warn!("Missing information for locus {name}");
             print!(".");
             continue;
         }
@@ -78,6 +82,6 @@ pub fn run(
         }
         print!(".");
     }
-    println!();
+    crate::cli_info!();
     Ok(())
 }

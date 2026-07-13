@@ -107,7 +107,9 @@ correction:$WORKFLOWS/contig-correction/Snakefile
 phasing:$WORKFLOWS/phasing/Snakefile
 ```
 
-Rust 版本会解析默认配置和用户配置，并展开 `$CONDA`、`$WORKFLOWS`。
+Rust 版本内嵌了上述默认配置，并在存在 `config/phyluce.conf` 时优先读取磁盘
+版本，随后合并 `~/.phyluce.conf`。因此独立安装不需要保留源码目录。程序会
+展开 `$CONDA`、`$WORKFLOWS`；也可通过 `PHYLUCE_CONFIG` 指定配置文件。
 
 查看当前解析到的配置：
 
@@ -153,7 +155,7 @@ phyluce_align_convert_degen_bases.log
 
 ## 5. 原版脚本名兼容
 
-Rust 二进制支持部分旧脚本名兼容：如果把 `phyluce` 复制或软链接为旧脚本名，它会自动映射到新的分组命令。
+Rust 二进制支持全部 74 个原版可执行脚本名：如果把 `phyluce` 复制或软链接为旧脚本名，它会自动映射到新的分组命令。
 
 例如：
 
@@ -168,28 +170,19 @@ ln -s target/release/phyluce phyluce_align_convert_degen_bases
 phyluce align convert-degen-bases --alignments in --output out
 ```
 
-当前已映射的旧脚本名：
+例如：
 
 ```text
 phyluce_align_convert_degen_bases
-phyluce_align_explode_alignments
-phyluce_align_extract_taxon_fasta_from_alignments
-phyluce_align_format_concatenated_phylip_for_paml
-phyluce_align_get_incomplete_matrix_estimates
-phyluce_align_get_only_loci_with_min_taxa
-phyluce_align_get_taxon_locus_counts_in_alignments
-phyluce_align_move_align_by_conf_file
-phyluce_align_randomly_sample_and_concatenate
-phyluce_align_reduce_alignments_with_raxml
-phyluce_align_remove_locus_name_from_files
-phyluce_align_screen_alignments_for_problems
-phyluce_align_get_smilogram_from_alignments
-phyluce_assembly_screen_probes_for_dupes
-phyluce_assembly_extract_contigs_to_barcodes
-phyluce_assembly_match_contigs_to_barcodes
+phyluce_assembly_get_fasta_lengths
+phyluce_probe_easy_lastz
+phyluce_genetrees_get_tree_counts
+phyluce_utilities_combine_reads
+phyluce_ncbi_chunk_fasta_for_ncbi
+phyluce_workflow
 ```
 
-未列出的命令请使用新的分组式 CLI。
+所有原版入口都可以使用相同方式创建链接；新分组式 CLI 仍是推荐入口。
 
 ## 6. UCE 主流程
 
@@ -902,16 +895,17 @@ phyluce probe reconstruct-uce-from-probe \
   --output reconstructed-uces.fasta
 ```
 
-如果一个 locus 有多个 probe，需要 MAFFT：
+如果一个 locus 有多个 probe，默认使用配置中的 MAFFT：
 
 ```bash
 phyluce probe reconstruct-uce-from-probe \
   --input probes.fasta \
-  --output reconstructed-uces.fasta \
-  --mafft-binary /path/to/mafft
+  --output reconstructed-uces.fasta
 ```
 
-注意：原版多 probe locus 使用 MUSCLE/Clustal 路径；Rust 版本使用 MAFFT。
+可通过 `--mafft-binary /path/to/mafft` 覆盖默认路径。需要复现原版
+MUSCLE 3/Clustal alignment 路径时，显式传入
+`--muscle-binary /path/to/muscle`。
 
 ### 8.9 2bit / BED / genome sequence 工具
 
@@ -1216,7 +1210,7 @@ phyluce external check --program binaries --binary mafft
 | `align get-smilogram-from-alignments` | major-allele tie 使用确定性规则 |
 | `probe get-screened-loci-by-proximity` | cluster tie 保留最小 locus id，而非随机选择 |
 | `probe get-tiled-probes` / `get-tiled-probe-from-multiple-inputs` | `--two-probes` tie 处理为确定性 |
-| `probe reconstruct-uce-from-probe` | 多 probe locus 使用 MAFFT，而非原版 MUSCLE/Clustal 路径 |
+| `probe reconstruct-uce-from-probe` | 默认使用 MAFFT；可通过 `--muscle-binary` 显式使用原版 MUSCLE 3/Clustal 路径 |
 | `probe run-multiple-lastzs-sqlite` | `--cores` 已接受但未按原版 chunked multiprocessing 并行化 |
 | `genetrees generate-multilocus-bootstrap-count` | 使用纯文本 replicate 格式，不使用 Python pickle |
 | `ncbi prep-uce-align-files-for-ncbi` | Rust 版按预期行为实现，不复现现代 Biopython 下原版导入失败 |
@@ -1289,21 +1283,21 @@ phyluce io validate-fasta --input input.fasta
 
 ## 16. 兼容性测试
 
-仓库包含兼容性测试脚本：
+独立仓库可直接运行内置 fixture：
 
 ```bash
-python3 tests/compat/run_all.py target/debug/phyluce
+python3 tests/compat/run_fixtures.py target/debug/phyluce
 ```
 
-也可以单独运行某个测试：
+与原版 Python 做完整动态对照时，指定原版源码目录：
 
 ```bash
-python3 tests/compat/compare_get_fasta_lengths.py target/debug/phyluce
-python3 tests/compat/compare_match_contigs_to_probes.py target/debug/phyluce
-python3 tests/compat/compare_seqcap_align.py target/debug/phyluce
+PHYLUCE_PYTHON_REPO=/path/to/phyluce \
+  python3 tests/compat/run_all.py target/debug/phyluce
 ```
 
-注意：完整测试会调用 MAFFT、LASTZ、RAxML 等外部程序。若当前环境没有这些程序，请只运行不依赖外部程序的子集，或在完整 conda 环境中运行。
+完整动态对照会调用原版依赖以及 MAFFT、LASTZ、RAxML 等外部程序；缺少这些
+依赖时应使用 `run_fixtures.py`。
 
 ## 17. 推荐最小示例
 
@@ -1360,4 +1354,3 @@ phyluce config inspect
 ```
 
 并保存每一步命令的 `--log-path` 日志，以便复现。
-

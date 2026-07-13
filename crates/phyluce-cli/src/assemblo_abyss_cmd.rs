@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_assembly::raw_reads::get_input_files;
 use phyluce_config::PhyluceConfig;
 use phyluce_io::{read_fasta, write_fasta_record};
@@ -63,7 +64,7 @@ fn run_abyss_pe(
     reads: &phyluce_assembly::raw_reads::ReadSet,
     cores: u32,
     output: &Path,
-) {
+) -> anyhow::Result<()> {
     let name = format!("out_k{kmer}");
     let mut cmd = std::process::Command::new(abyss_pe);
     cmd.current_dir(output)
@@ -78,13 +79,12 @@ fn run_abyss_pe(
     if let Some(s) = &reads.singleton {
         cmd.arg(format!("se={}", s.display()));
     }
-    if let (Ok(out), Ok(err)) = (
-        std::fs::File::create(output.join(format!("abyss-k{kmer}.out.log"))),
-        std::fs::File::create(output.join(format!("abyss-k{kmer}.err.log"))),
-    ) {
-        cmd.stdout(out).stderr(err);
-    }
-    let _ = cmd.status();
+    let out = std::fs::File::create(output.join(format!("abyss-k{kmer}.out.log")))?;
+    let err = std::fs::File::create(output.join(format!("abyss-k{kmer}.err.log")))?;
+    cmd.stdout(out).stderr(err);
+    let status = cmd.status().context("running abyss-pe")?;
+    anyhow::ensure!(status.success(), "abyss-pe failed: {status}");
+    Ok(())
 }
 
 fn run_abyss_se(
@@ -93,7 +93,7 @@ fn run_abyss_se(
     reads: &phyluce_assembly::raw_reads::ReadSet,
     output: &Path,
     abyss_se: bool,
-) {
+) -> anyhow::Result<()> {
     let mut cmd = std::process::Command::new(abyss);
     cmd.current_dir(output)
         .arg("-k")
@@ -107,13 +107,12 @@ fn run_abyss_se(
             cmd.arg(s);
         }
     }
-    if let (Ok(out), Ok(err)) = (
-        std::fs::File::create(output.join(format!("abyss-k{kmer}.out.log"))),
-        std::fs::File::create(output.join(format!("abyss-k{kmer}.err.log"))),
-    ) {
-        cmd.stdout(out).stderr(err);
-    }
-    let _ = cmd.status();
+    let out = std::fs::File::create(output.join(format!("abyss-k{kmer}.out.log")))?;
+    let err = std::fs::File::create(output.join(format!("abyss-k{kmer}.err.log")))?;
+    cmd.stdout(out).stderr(err);
+    let status = cmd.status().context("running abyss")?;
+    anyhow::ensure!(status.success(), "abyss failed: {status}");
+    Ok(())
 }
 
 fn cleanup_abyss_assembly_folder(output: &Path, single_end: bool) -> anyhow::Result<()> {
@@ -167,14 +166,13 @@ fn find_contigs_file(output: &Path) -> anyhow::Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("no *-contigs.fa found in {}", output.display()))
 }
 
-fn symlink(target: &Path, link: &Path) {
+fn symlink(target: &Path, link: &Path) -> anyhow::Result<()> {
     #[cfg(unix)]
-    let _ = std::os::unix::fs::symlink(target, link);
+    std::os::unix::fs::symlink(target, link)
+        .with_context(|| format!("creating symlink {}", link.display()))?;
     #[cfg(not(unix))]
-    {
-        let _ = target;
-        let _ = link;
-    }
+    anyhow::bail!("contig symlinks are only supported on Unix");
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -198,8 +196,8 @@ pub fn run(
 
     let input_data = get_input_data(config, dir)?;
     for (sample, sample_input_dir) in &input_data {
-        println!("Processing {sample}");
-        let sample_dir = output.join(sample);
+        crate::cli_info!("Processing {sample}");
+        let sample_dir = crate::output_path::output_file(output, sample)?;
         std::fs::create_dir_all(&sample_dir)?;
         let reads = get_input_files(sample_input_dir, subfolder)?;
 
@@ -208,7 +206,7 @@ pub fn run(
             let bin = abyss_pe_bin
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("Cannot find abyss-pe"))?;
-            run_abyss_pe(bin, kmer, &reads, cores, &sample_dir);
+            run_abyss_pe(bin, kmer, &reads, cores, &sample_dir)?;
             single_end = false;
             if clean {
                 cleanup_abyss_assembly_folder(&sample_dir, single_end)?;
@@ -217,7 +215,7 @@ pub fn run(
             let bin = abyss_bin
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("Cannot find abyss"))?;
-            run_abyss_se(bin, kmer, &reads, &sample_dir, abyss_se);
+            run_abyss_se(bin, kmer, &reads, &sample_dir, abyss_se)?;
             single_end = true;
             if clean {
                 cleanup_abyss_assembly_folder(&sample_dir, single_end)?;
@@ -226,9 +224,11 @@ pub fn run(
 
         let contigs_file = find_contigs_file(&sample_dir)?;
         let velvet_style = convert_abyss_contigs_to_velvet(&contigs_file)?;
-        symlink(&velvet_style, &sample_dir.join("contigs.fasta"));
+        symlink(&velvet_style, &sample_dir.join("contigs.fasta"))?;
         if let Some(relpth) = pathdiff_pub(&velvet_style, &contig_dir) {
-            symlink(&relpth, &contig_dir.join(format!("{sample}.contigs.fasta")));
+            let link =
+                crate::output_path::output_file(&contig_dir, &format!("{sample}.contigs.fasta"))?;
+            symlink(&relpth, &link)?;
         }
     }
     Ok(())

@@ -72,6 +72,15 @@ fn middle_overlapper(
     Ok(coords)
 }
 
+fn validate_tiling(length: usize, density: f64) -> anyhow::Result<()> {
+    anyhow::ensure!(length > 0, "--probe-length must be greater than zero");
+    anyhow::ensure!(
+        density.is_finite() && density > 0.0 && density <= length as f64,
+        "--tiling-density must be finite, greater than zero, and no greater than --probe-length"
+    );
+    Ok(())
+}
+
 struct LocusMeta {
     chromo: String,
     start: i64,
@@ -168,6 +177,7 @@ pub fn run(
     output: &Path,
     args: &TilingArgs,
 ) -> anyhow::Result<()> {
+    validate_tiling(args.length, args.density)?;
     let conf_text = std::fs::read_to_string(multi_fasta_output)?;
     let sections = crate::conf::parse_ini(&conf_text);
     let hits = sections
@@ -209,8 +219,8 @@ pub fn run(
 
     let cons_count = probe_set.len();
     let probe_count: usize = probe_set.iter().map(|p| p.len()).sum();
-    eprintln!("Conserved locus count = {cons_count}");
-    eprintln!("Probe Count = {probe_count}");
+    crate::cli_warn!("Conserved locus count = {cons_count}");
+    crate::cli_warn!("Probe Count = {probe_count}");
 
     let mut out = std::fs::File::create(output)?;
     for ps in &probe_set {
@@ -219,4 +229,18 @@ pub fn run(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_non_progressing_tiling_parameters() {
+        assert!(validate_tiling(0, 2.0).is_err());
+        assert!(validate_tiling(120, 0.0).is_err());
+        assert!(validate_tiling(120, f64::INFINITY).is_err());
+        assert!(validate_tiling(120, 121.0).is_err());
+        assert!(validate_tiling(120, 2.0).is_ok());
+    }
 }

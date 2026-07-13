@@ -31,11 +31,11 @@ pub fn run(
             std::fs::copy(file, output_dir.join(name))?;
             count += 1;
         } else if has_n {
-            eprintln!("Removed locus {name} due to presence of N bases");
+            crate::cli_warn!("Removed locus {name} due to presence of N bases");
         } else {
-            eprintln!("Removed locus {name} due to presence of X bases");
+            crate::cli_warn!("Removed locus {name} due to presence of X bases");
         }
     }
-    println!("Copied {count} good alignments");
+    crate::cli_info!("Copied {count} good alignments");
     Ok(())
 }

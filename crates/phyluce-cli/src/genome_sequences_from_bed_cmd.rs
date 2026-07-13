@@ -62,7 +62,7 @@ pub fn run(
         }
     }
 
-    eprintln!(
+    crate::cli_warn!(
         "Screened {} sequences.  Filtered {filtered} < 160 bp or with > {}% masked bases or > {max_n} N-bases. Kept {kept}.",
         cnt + 1,
         filter_mask.unwrap_or(0.25) * 100.0,

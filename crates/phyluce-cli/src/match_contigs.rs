@@ -200,7 +200,7 @@ pub fn run(
         } else {
             0.0
         };
-        println!(
+        crate::cli_info!(
             "{}: {} ({:.2}%) uniques of {} contigs, {} dupe probe matches, \
              {} UCE loci removed for matching multiple contigs, {} contigs \
              removed for matching multiple UCE loci",
@@ -228,8 +228,8 @@ pub fn run(
     if let Some(mut w) = csv_writer {
         w.flush()?;
     }
-    println!("The LASTZ alignments are in {}", output_dir.display());
-    println!("The UCE match database is in {}", db_path.display());
+    crate::cli_info!("The LASTZ alignments are in {}", output_dir.display());
+    crate::cli_info!("The UCE match database is in {}", db_path.display());
     Ok(())
 }
 

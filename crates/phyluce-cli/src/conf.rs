@@ -10,28 +10,15 @@ use std::collections::HashMap;
 /// `:`/`=` delimiter is kept as a bare entry with an empty value (used by
 /// several commands' plain item-list sections, e.g. `[set1]\nlocusA\n`).
 pub fn parse_ini(text: &str) -> HashMap<String, Vec<(String, String)>> {
-    let mut sections: HashMap<String, Vec<(String, String)>> = HashMap::new();
-    let mut current: Option<String> = None;
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            let name = line[1..line.len() - 1].trim().to_string();
-            sections.entry(name.clone()).or_default();
-            current = Some(name);
-            continue;
-        }
-        if let Some(section) = &current {
-            let (k, v) = match line.split_once(':').or_else(|| line.split_once('=')) {
-                Some((k, v)) => (k.trim().to_string(), v.trim().to_string()),
-                None => (line.to_string(), String::new()),
-            };
-            sections.entry(section.clone()).or_default().push((k, v));
-        }
-    }
-    sections
+    let ini = phyluce_config::Ini::parse_allow_no_value(text);
+    ini.section_names()
+        .map(|section| {
+            (
+                section.to_string(),
+                ini.entries(section).unwrap_or_default().to_vec(),
+            )
+        })
+        .collect()
 }
 
 /// Mirrors `dict((name, dirs.split(",")) for name, dirs in

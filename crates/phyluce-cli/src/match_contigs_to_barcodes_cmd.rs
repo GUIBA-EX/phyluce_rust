@@ -77,7 +77,7 @@ pub fn run(
         for m in &matches {
             let matching_contig = m.name2.split(' ').next().unwrap_or(&m.name2).to_string();
             let Some(record) = record_dict.get(&matching_contig) else {
-                eprintln!("Did not find a match for locus {matching_contig}");
+                crate::cli_warn!("Did not find a match for locus {matching_contig}");
                 continue;
             };
             let start = m.zstart2 as usize;

@@ -51,7 +51,7 @@ pub fn run_get(conf: &Path, output: &Path, base_taxon: &str) -> anyhow::Result<(
 
     let mut organisms = Vec::new();
     let mut conserved: HashMap<String, Vec<Interval>> = HashMap::new();
-    println!("Reading the BED file for:");
+    crate::cli_info!("Reading the BED file for:");
     for (taxon_name, bedfile) in beds {
         organisms.push(taxon_name.clone());
         let text = std::fs::read_to_string(bedfile)?;
@@ -126,6 +126,11 @@ pub fn run_query(
         .query_map([], |r| r.get::<_, String>(1))?
         .collect::<Result<_, _>>()?;
     // columns: uce, chromo, start, stop, <taxa...>
+    anyhow::ensure!(
+        columns.len() >= 5
+            && columns[..4] == ["uce", "chromo", "start", "stop"],
+        "database table {base_taxon:?} must contain uce/chromo/start/stop and at least one taxon column"
+    );
     let taxa = &columns[4..];
     let column_count = columns.len();
 
@@ -169,7 +174,7 @@ pub fn run_query(
                 writeln!(out2, "{joined}")?;
             }
         }
-        println!("{counter:?}");
+        crate::cli_info!("{counter:?}");
     } else {
         let mut counts = vec![0usize; taxa.len() + 1];
         let mut rows = stmt.query([])?;
@@ -182,7 +187,7 @@ pub fn run_query(
         }
         for i in 0..=taxa.len() {
             let total: usize = counts[i..].iter().sum();
-            println!("Loci shared by {base_taxon} + {i} taxa:\t{total}");
+            crate::cli_info!("Loci shared by {base_taxon} + {i} taxa:\t{total}");
         }
     }
     Ok(())

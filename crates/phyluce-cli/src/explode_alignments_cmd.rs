@@ -41,7 +41,7 @@ pub fn run(
                 names.insert(k.replace(' ', "_"), v.clone());
             }
         }
-        println!("Original taxon count =  {}", names.len());
+        crate::cli_info!("Original taxon count =  {}", names.len());
         for taxon in exclude {
             names.remove(taxon);
         }
@@ -79,7 +79,8 @@ pub fn run(
                 let handle = if let Some(h) = handles.get_mut(&shortname) {
                     h
                 } else {
-                    let path = output_dir.join(format!("{shortname}.fasta"));
+                    let path =
+                        crate::output_path::output_file(output_dir, &format!("{shortname}.fasta"))?;
                     handles.insert(shortname.clone(), std::fs::File::create(path)?);
                     handles.get_mut(&shortname).unwrap()
                 };
@@ -118,7 +119,7 @@ pub fn run(
                     .filter(|&c| c != '-' && c != '?')
                     .collect();
                 if seq.is_empty() {
-                    println!("{locus}");
+                    crate::cli_info!("{locus}");
                     continue;
                 }
                 writeln!(outp, ">{shortname}")?;
@@ -127,9 +128,9 @@ pub fn run(
             }
             taxon_counts.push(count);
         }
-        println!();
+        crate::cli_info!();
         let unique: std::collections::HashSet<usize> = taxon_counts.into_iter().collect();
-        println!("Final taxon count =  {unique:?}");
+        crate::cli_info!("Final taxon count =  {unique:?}");
     }
     Ok(())
 }

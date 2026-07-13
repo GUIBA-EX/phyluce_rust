@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_assembly::raw_reads::get_input_files;
 use phyluce_config::PhyluceConfig;
 
@@ -70,7 +71,7 @@ fn cleanup_assembly_directory(dir: &Path) -> anyhow::Result<()> {
         || !names.contains(&"contigs.fasta".to_string())
         || !names.contains(&"spades.log".to_string())
     {
-        eprintln!("Expected assembly files were not found in output.");
+        crate::cli_warn!("Expected assembly files were not found in output.");
         return Ok(());
     }
     for entry in std::fs::read_dir(dir)? {
@@ -90,15 +91,23 @@ fn cleanup_assembly_directory(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn generate_symlink(contig_dir: &Path, sample_dir: &Path, sample: &str) {
+fn generate_symlink(contig_dir: &Path, sample_dir: &Path, sample: &str) -> anyhow::Result<()> {
     let spades_fname = sample_dir.join("contigs.fasta");
-    let Ok(relpth) = pathdiff(&spades_fname, contig_dir) else {
-        eprintln!("Unable to symlink {} for {sample}", spades_fname.display());
-        return;
-    };
-    let link_path = contig_dir.join(format!("{sample}.contigs.fasta"));
+    anyhow::ensure!(
+        spades_fname.is_file(),
+        "SPAdes did not produce {}",
+        spades_fname.display()
+    );
+    let relpth = pathdiff(&spades_fname, contig_dir)
+        .with_context(|| format!("computing contig link for {sample}"))?;
+    let link_path =
+        crate::output_path::output_file(contig_dir, &format!("{sample}.contigs.fasta"))?;
     #[cfg(unix)]
-    let _ = std::os::unix::fs::symlink(relpth, link_path);
+    std::os::unix::fs::symlink(relpth, link_path)
+        .with_context(|| format!("creating contig link for {sample}"))?;
+    #[cfg(not(unix))]
+    anyhow::bail!("contig symlinks are only supported on Unix");
+    Ok(())
 }
 
 /// Minimal relative-path computation (std lacks one): assumes both paths
@@ -149,14 +158,14 @@ pub fn run(
 
     let input_data = get_input_data(config, dir)?;
     for (sample, sample_input_dir) in &input_data {
-        println!("Processing {sample}");
-        let sample_dir = output.join(format!("{sample}_spades"));
+        crate::cli_info!("Processing {sample}");
+        let sample_dir = crate::output_path::output_file(output, &format!("{sample}_spades"))?;
         std::fs::create_dir_all(&sample_dir)?;
 
         let reads = get_input_files(sample_input_dir, subfolder)?;
         match (&reads.r1, &reads.r2) {
             (Some(r1), Some(r2)) => {
-                println!("Running SPAdes for PE data");
+                crate::cli_info!("Running SPAdes for PE data");
                 let mut cmd = std::process::Command::new(&spades_bin);
                 cmd.arg("--careful")
                     .arg("--sc")
@@ -175,15 +184,21 @@ pub fn run(
                 if let Some(s) = &reads.singleton {
                     cmd.arg("--pe1-s").arg(s);
                 }
-                let _ = cmd.status();
+                let status = cmd
+                    .status()
+                    .with_context(|| format!("running SPAdes for sample {sample}"))?;
+                anyhow::ensure!(
+                    status.success(),
+                    "SPAdes failed for sample {sample}: {status}"
+                );
 
                 if !no_clean {
                     cleanup_assembly_directory(&sample_dir)?;
                 }
-                generate_symlink(&contig_dir, &sample_dir, sample);
+                generate_symlink(&contig_dir, &sample_dir, sample)?;
             }
             (Some(_), None) => {
-                eprintln!("assemblo-spades will not run single-end data");
+                crate::cli_warn!("assemblo-spades will not run single-end data");
             }
             _ => {}
         }

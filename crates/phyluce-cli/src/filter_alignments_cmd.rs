@@ -51,7 +51,7 @@ pub fn run(
         if contains_ok && length_ok && taxa_ok {
             let name = file.file_name().unwrap();
             std::fs::copy(file, output_dir.join(name))?;
-            println!("Good alignment: {}", name.to_string_lossy());
+            crate::cli_info!("Good alignment: {}", name.to_string_lossy());
         }
     }
     Ok(())

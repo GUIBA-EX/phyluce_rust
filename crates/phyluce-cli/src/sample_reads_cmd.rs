@@ -61,7 +61,7 @@ fn run_seqtk(
         frac * 100.0
     ));
 
-    eprintln!(
+    crate::cli_warn!(
         "\tfrac:{frac}, input:{fastq}, rand:{rand}, reads:{reads}, out_fname:{}",
         out_fname.display()
     );
@@ -97,7 +97,7 @@ fn sample_reads_with_seqtk(
     output_dir: &Path,
     rng: &mut SimpleRng,
 ) -> anyhow::Result<()> {
-    eprintln!("\tGetting reads for {frac} UCE fraction");
+    crate::cli_warn!("\tGetting reads for {frac} UCE fraction");
     let mut names: Vec<&String> = to_get.keys().collect();
     names.sort();
     for name in names {
@@ -170,7 +170,7 @@ pub fn run(conf: &Path, output: &Path) -> anyhow::Result<()> {
         let genome = total_reads - uce - mtdna;
         to_get.insert("genome".to_string(), genome);
 
-        eprintln!(
+        crate::cli_warn!(
             "Reads:{total_reads}, UCE:{uce} - {frac} on target, mtDNA:{mtdna}, genome:{genome}"
         );
         sample_reads_with_seqtk(

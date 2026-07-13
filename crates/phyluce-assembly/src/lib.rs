@@ -28,6 +28,8 @@ pub enum MatchError {
     NoProbeNameMatch(String),
     #[error("no regex match for contig name in header: {0:?}")]
     NoContigNameMatch(String),
+    #[error("contig {contig:?} matched {count} UCE loci; expected exactly one")]
+    InvalidFilteredMatchCount { contig: String, count: usize },
     #[error(
         "taxon name '{name}' contains or begins with an illegal character: '{illegal}'. \
          Use only letters, numbers (after a letter), and underscores"
@@ -283,12 +285,17 @@ pub mod db {
         matches: &HashMap<String, HashSet<String>>,
         orientation: &HashMap<String, HashSet<String>>,
         critter: &str,
-    ) -> rusqlite::Result<()> {
+    ) -> Result<(), MatchError> {
+        let column = ident(critter);
+        let tx = conn.unchecked_transaction()?;
         for (contig, uces) in matches {
-            assert_eq!(uces.len(), 1, "More than one match");
-            let uce = uces.iter().next().unwrap();
-            let column = ident(critter);
-            conn.execute(
+            let Some(uce) = uces.iter().next().filter(|_| uces.len() == 1) else {
+                return Err(MatchError::InvalidFilteredMatchCount {
+                    contig: contig.clone(),
+                    count: uces.len(),
+                });
+            };
+            tx.execute(
                 &format!("UPDATE matches SET {column} = 1 WHERE uce = ?1"),
                 [uce],
             )?;
@@ -298,11 +305,12 @@ pub mod db {
                 .cloned()
                 .unwrap_or_default();
             let orient_value = format!("{contig}({strand})");
-            conn.execute(
+            tx.execute(
                 &format!("UPDATE match_map SET {column} = ?1 WHERE uce = ?2"),
                 rusqlite::params![orient_value, uce],
             )?;
         }
+        tx.commit()?;
         Ok(())
     }
 }
@@ -393,6 +401,15 @@ mod tests {
         let mut orientation = HashMap::new();
         orientation.insert("uce-1".to_string(), HashSet::from(["+".to_string()]));
         db::store_lastz_results(&conn, &matches, &orientation, "taxon_a").unwrap();
+
+        let invalid = HashMap::from([(
+            "NODE_2".to_string(),
+            HashSet::from(["uce-1".to_string(), "uce-2".to_string()]),
+        )]);
+        assert!(matches!(
+            db::store_lastz_results(&conn, &invalid, &orientation, "taxon_b"),
+            Err(MatchError::InvalidFilteredMatchCount { count: 2, .. })
+        ));
 
         let value: Option<String> = conn
             .query_row(

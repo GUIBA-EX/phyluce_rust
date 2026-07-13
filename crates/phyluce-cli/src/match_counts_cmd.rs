@@ -22,15 +22,15 @@ pub fn run(
     let conn = Connection::open(locus_db)?;
     if let Some(extend) = &extend_locus_db {
         conn.execute(
-            &format!("ATTACH DATABASE '{}' AS extended", extend.display()),
-            [],
+            "ATTACH DATABASE ?1 AS extended",
+            [extend.to_string_lossy().as_ref()],
         )?;
     }
 
     let config = read_taxon_list_config(taxon_list_config)?;
     let organisms = taxa_from_config(&config, taxon_group)
         .with_context(|| format!("taxon-group '{taxon_group}'"))?;
-    println!(
+    crate::cli_info!(
         "There are {} taxa in the taxon-group '[{}]' in the config file {}",
         organisms.len(),
         taxon_group,
@@ -38,26 +38,26 @@ pub fn run(
     );
 
     let uces = uce_names(&conn)?;
-    println!("There are {} total UCE loci in the database", uces.len());
+    crate::cli_info!("There are {} total UCE loci in the database", uces.len());
 
     let organismal_matches = matches_by_organism(&conn, &organisms)?;
     let shared_uces = if !incomplete_matrix_flag {
-        println!("Getting UCE matches by organism to generate a COMPLETE matrix");
+        crate::cli_info!("Getting UCE matches by organism to generate a COMPLETE matrix");
         let (shared, losses) = complete_matrix(&organismal_matches, &organisms, &uces);
-        println!(
+        crate::cli_info!(
             "There are {} shared UCE loci in a COMPLETE matrix",
             shared.len()
         );
         let mut sorted_losses: Vec<(&String, &usize)> = losses.iter().collect();
         sorted_losses.sort_by(|a, b| b.1.cmp(a.1));
         for (organism, loss) in sorted_losses {
-            println!("\tFailed to detect {loss} UCE loci in {organism}");
+            crate::cli_info!("\tFailed to detect {loss} UCE loci in {organism}");
         }
         shared
     } else {
-        println!("Getting UCE matches by organism to generate a INCOMPLETE matrix");
+        crate::cli_info!("Getting UCE matches by organism to generate a INCOMPLETE matrix");
         let shared = incomplete_matrix(&organismal_matches, &uces);
-        println!(
+        crate::cli_info!(
             "There are {} UCE loci in an INCOMPLETE matrix",
             shared.len()
         );
@@ -65,7 +65,7 @@ pub fn run(
     };
 
     if !organisms.is_empty() {
-        println!(
+        crate::cli_info!(
             "Writing the taxa and loci in the data matrix to {}",
             output.display()
         );

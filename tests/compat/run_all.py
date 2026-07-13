@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from common import find_python_repo
+
 HERE = Path(__file__).resolve().parent
 
 SCRIPTS = [
@@ -36,6 +38,11 @@ SCRIPTS = [
 
 
 def main():
+    try:
+        find_python_repo()
+    except RuntimeError as error:
+        print(error, file=sys.stderr)
+        return 2
     rust_bin = sys.argv[1] if len(sys.argv) > 1 else None
     failed = []
     for script in SCRIPTS:

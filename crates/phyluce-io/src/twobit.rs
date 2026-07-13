@@ -3,7 +3,10 @@
 //! <https://genome.ucsc.edu/FAQ/FAQformat.html#format7> for the format.
 
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::Mutex;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TwoBitError {
@@ -15,78 +18,183 @@ pub enum TwoBitError {
     Truncated,
     #[error("sequence {0:?} not found in .2bit file")]
     NotFound(String),
+    #[error("invalid .2bit file: {0}")]
+    Invalid(String),
 }
 
 pub struct TwoBitFile {
-    data: Vec<u8>,
+    source: Source,
     big_endian: bool,
-    index: HashMap<String, u32>,
+    index: HashMap<String, u64>,
+}
+
+enum Source {
+    Bytes(Vec<u8>),
+    File { file: Mutex<File>, len: u64 },
 }
 
 const SIGNATURE: u32 = 0x1A412743;
 
 impl TwoBitFile {
     pub fn open(path: &Path) -> Result<Self, TwoBitError> {
-        let data = std::fs::read(path)?;
-        Self::from_bytes(data)
+        let file = File::open(path)?;
+        let len = file.metadata()?.len();
+        Self::from_source(Source::File {
+            file: Mutex::new(file),
+            len,
+        })
     }
 
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, TwoBitError> {
-        if data.len() < 16 {
+        Self::from_source(Source::Bytes(data))
+    }
+
+    fn from_source(source: Source) -> Result<Self, TwoBitError> {
+        if source.len() < 16 {
             return Err(TwoBitError::Truncated);
         }
-        let sig_le = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let signature: [u8; 4] = source
+            .read_at(0, 4)?
+            .try_into()
+            .map_err(|_| TwoBitError::Truncated)?;
+        let sig_le = u32::from_le_bytes(signature);
         let big_endian = if sig_le == SIGNATURE {
             false
         } else {
-            let sig_be = u32::from_be_bytes(data[0..4].try_into().unwrap());
+            let sig_be = u32::from_be_bytes(signature);
             if sig_be == SIGNATURE {
                 true
             } else {
                 return Err(TwoBitError::BadSignature);
             }
         };
-        let read_u32 = |d: &[u8], off: usize| -> Result<u32, TwoBitError> {
-            let b = d.get(off..off + 4).ok_or(TwoBitError::Truncated)?;
-            Ok(if big_endian {
-                u32::from_be_bytes(b.try_into().unwrap())
-            } else {
-                u32::from_le_bytes(b.try_into().unwrap())
-            })
-        };
-        let seq_count = read_u32(&data, 8)? as usize;
-        let mut offset = 16usize;
-        let mut index = HashMap::with_capacity(seq_count);
+        let read_u32 = |off| read_u32_from(&source, big_endian, off);
+        let seq_count = read_u32(8)? as usize;
+        let max_entries = ((source.len().saturating_sub(16)) / 5) as usize;
+        if seq_count > max_entries {
+            return Err(TwoBitError::Invalid(
+                "sequence index exceeds file size".to_string(),
+            ));
+        }
+        let mut offset = 16u64;
+        let mut index = HashMap::new();
         for _ in 0..seq_count {
-            let name_size = *data.get(offset).ok_or(TwoBitError::Truncated)? as usize;
+            let name_size = source.read_at(offset, 1)?[0] as usize;
             offset += 1;
-            let name_bytes = data
-                .get(offset..offset + name_size)
-                .ok_or(TwoBitError::Truncated)?;
-            let name = String::from_utf8_lossy(name_bytes).to_string();
-            offset += name_size;
-            let seq_offset = read_u32(&data, offset)?;
-            offset += 4;
-            index.insert(name, seq_offset);
+            let name_bytes = source.read_at(offset, name_size)?;
+            let name = String::from_utf8_lossy(&name_bytes).to_string();
+            offset = checked_add(offset, name_size as u64)?;
+            let seq_offset = read_u32(offset)?;
+            offset = checked_add(offset, 4)?;
+            index.insert(name, seq_offset as u64);
         }
         Ok(Self {
-            data,
+            source,
             big_endian,
             index,
         })
     }
 
-    fn read_u32(&self, off: usize) -> Result<u32, TwoBitError> {
-        let b = self.data.get(off..off + 4).ok_or(TwoBitError::Truncated)?;
-        Ok(if self.big_endian {
-            u32::from_be_bytes(b.try_into().unwrap())
-        } else {
-            u32::from_le_bytes(b.try_into().unwrap())
+    fn read_u32(&self, off: u64) -> Result<u32, TwoBitError> {
+        read_u32_from(&self.source, self.big_endian, off)
+    }
+
+    fn sequence_offset(&self, name: &str) -> Result<u64, TwoBitError> {
+        self.index
+            .get(name)
+            .copied()
+            .ok_or_else(|| TwoBitError::NotFound(name.to_string()))
+    }
+
+    fn sequence_layout(&self, name: &str) -> Result<SequenceLayout, TwoBitError> {
+        let offset = self.sequence_offset(name)?;
+        let dna_size = self.read_u32(offset)? as u64;
+        let n_block_count = self.read_u32(checked_add(offset, 4)?)? as usize;
+        let n_starts_offset = checked_add(offset, 8)?;
+        let n_sizes_offset = checked_add(n_starts_offset, bytes_for_u32s(n_block_count)?)?;
+        let mask_count_offset = checked_add(n_sizes_offset, bytes_for_u32s(n_block_count)?)?;
+        let mask_block_count = self.read_u32(mask_count_offset)? as usize;
+        let mask_starts_offset = checked_add(mask_count_offset, 4)?;
+        let mask_sizes_offset = checked_add(mask_starts_offset, bytes_for_u32s(mask_block_count)?)?;
+        let reserved_offset = checked_add(mask_sizes_offset, bytes_for_u32s(mask_block_count)?)?;
+        let packed_offset = checked_add(reserved_offset, 4)?;
+        let packed_len = dna_size.div_ceil(4);
+        self.source.ensure_range(
+            packed_offset,
+            usize::try_from(packed_len).map_err(|_| {
+                TwoBitError::Invalid("packed sequence length exceeds address space".to_string())
+            })?,
+        )?;
+        Ok(SequenceLayout {
+            dna_size,
+            n_starts_offset,
+            n_sizes_offset,
+            n_block_count,
+            mask_starts_offset,
+            mask_sizes_offset,
+            mask_block_count,
+            packed_offset,
         })
     }
 
+    fn read_blocks(
+        &self,
+        starts_offset: u64,
+        sizes_offset: u64,
+        count: usize,
+        dna_size: u64,
+    ) -> Result<Vec<(u64, u64)>, TwoBitError> {
+        let mut blocks = Vec::with_capacity(count);
+        for i in 0..count {
+            let delta = checked_mul(i as u64, 4)?;
+            let start = self.read_u32(checked_add(starts_offset, delta)?)? as u64;
+            let len = self.read_u32(checked_add(sizes_offset, delta)?)? as u64;
+            if start > dna_size || len > dna_size.saturating_sub(start) {
+                return Err(TwoBitError::Invalid(
+                    "block exceeds sequence length".to_string(),
+                ));
+            }
+            blocks.push((start, len));
+        }
+        Ok(blocks)
+    }
+
+    fn apply_blocks(seq: &mut [u8], slice_start: u64, blocks: &[(u64, u64)], value: u8) {
+        let slice_end = slice_start + seq.len() as u64;
+        for &(start, len) in blocks {
+            let end = start + len;
+            let overlap_start = start.max(slice_start);
+            let overlap_end = end.min(slice_end);
+            if overlap_start < overlap_end {
+                for base in &mut seq
+                    [(overlap_start - slice_start) as usize..(overlap_end - slice_start) as usize]
+                {
+                    *base = value;
+                }
+            }
+        }
+    }
+
+    fn apply_mask_blocks(seq: &mut [u8], slice_start: u64, blocks: &[(u64, u64)]) {
+        let slice_end = slice_start + seq.len() as u64;
+        for &(start, len) in blocks {
+            let end = start + len;
+            let overlap_start = start.max(slice_start);
+            let overlap_end = end.min(slice_end);
+            if overlap_start < overlap_end {
+                for base in &mut seq
+                    [(overlap_start - slice_start) as usize..(overlap_end - slice_start) as usize]
+                {
+                    *base = base.to_ascii_lowercase();
+                }
+            }
+        }
+    }
+
     pub fn names(&self) -> Vec<&str> {
-        self.index.keys().map(|s| s.as_str()).collect()
+        let mut names: Vec<&str> = self.index.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        names
     }
 
     pub fn contains(&self, name: &str) -> bool {
@@ -94,89 +202,129 @@ impl TwoBitFile {
     }
 
     pub fn sequence_len(&self, name: &str) -> Result<u32, TwoBitError> {
-        let off = *self
-            .index
-            .get(name)
-            .ok_or_else(|| TwoBitError::NotFound(name.to_string()))?;
-        self.read_u32(off as usize)
+        self.read_u32(self.sequence_offset(name)?)
     }
 
     /// Decode the full sequence for `name`: uppercase ACGT with N-blocks
     /// written as 'N' and soft-masked regions lowercased (matching
     /// `bx.seq.twobit`'s convention).
     pub fn read_full(&self, name: &str) -> Result<Vec<u8>, TwoBitError> {
-        let off = *self
-            .index
-            .get(name)
-            .ok_or_else(|| TwoBitError::NotFound(name.to_string()))? as usize;
-        let dna_size = self.read_u32(off)? as usize;
-        let n_block_count = self.read_u32(off + 4)? as usize;
-        let mut pos = off + 8;
-        let mut n_starts = Vec::with_capacity(n_block_count);
-        for i in 0..n_block_count {
-            n_starts.push(self.read_u32(pos + i * 4)?);
-        }
-        pos += n_block_count * 4;
-        let mut n_sizes = Vec::with_capacity(n_block_count);
-        for i in 0..n_block_count {
-            n_sizes.push(self.read_u32(pos + i * 4)?);
-        }
-        pos += n_block_count * 4;
-        let mask_block_count = self.read_u32(pos)? as usize;
-        pos += 4;
-        let mut mask_starts = Vec::with_capacity(mask_block_count);
-        for i in 0..mask_block_count {
-            mask_starts.push(self.read_u32(pos + i * 4)?);
-        }
-        pos += mask_block_count * 4;
-        let mut mask_sizes = Vec::with_capacity(mask_block_count);
-        for i in 0..mask_block_count {
-            mask_sizes.push(self.read_u32(pos + i * 4)?);
-        }
-        pos += mask_block_count * 4;
-        pos += 4; // reserved
-
-        let packed_len = dna_size.div_ceil(4);
-        let packed = self
-            .data
-            .get(pos..pos + packed_len)
-            .ok_or(TwoBitError::Truncated)?;
-
-        const BASES: [u8; 4] = [b'T', b'C', b'A', b'G'];
-        let mut seq = Vec::with_capacity(dna_size);
-        for i in 0..dna_size {
-            let byte = packed[i / 4];
-            let shift = 6 - 2 * (i % 4);
-            let code = (byte >> shift) & 0x3;
-            seq.push(BASES[code as usize]);
-        }
-
-        for (&s, &l) in mask_starts.iter().zip(mask_sizes.iter()) {
-            let (s, l) = (s as usize, l as usize);
-            for base in seq.iter_mut().skip(s).take(l) {
-                *base = base.to_ascii_lowercase();
-            }
-        }
-        for (&s, &l) in n_starts.iter().zip(n_sizes.iter()) {
-            let (s, l) = (s as usize, l as usize);
-            for base in seq.iter_mut().skip(s).take(l) {
-                *base = b'N';
-            }
-        }
-        Ok(seq)
+        let dna_size = self.sequence_len(name)? as i64;
+        self.read_slice(name, 0, dna_size)
     }
 
-    /// Half-open `[start, end)` slice, clamped to the sequence bounds.
+    /// Half-open `[start, end)` slice, clamped to the sequence bounds. Only
+    /// the requested packed bases are read and decoded; it does not allocate
+    /// the full chromosome for every interval.
     pub fn read_slice(&self, name: &str, start: i64, end: i64) -> Result<Vec<u8>, TwoBitError> {
-        let full = self.read_full(name)?;
-        let len = full.len() as i64;
-        let start = start.clamp(0, len) as usize;
-        let end = end.clamp(0, len) as usize;
+        let layout = self.sequence_layout(name)?;
+        let sequence_len = layout.dna_size as i64;
+        let start = start.clamp(0, sequence_len) as u64;
+        let end = end.clamp(0, sequence_len) as u64;
         if start >= end {
             return Ok(Vec::new());
         }
-        Ok(full[start..end].to_vec())
+
+        let packed_start = start / 4;
+        let packed_end = end.div_ceil(4);
+        let packed_len = usize::try_from(packed_end - packed_start)
+            .map_err(|_| TwoBitError::Invalid("slice length exceeds address space".to_string()))?;
+        let packed = self
+            .source
+            .read_at(checked_add(layout.packed_offset, packed_start)?, packed_len)?;
+
+        const BASES: [u8; 4] = [b'T', b'C', b'A', b'G'];
+        let mut seq = Vec::with_capacity((end - start) as usize);
+        for position in start..end {
+            let byte = packed[(position / 4 - packed_start) as usize];
+            let shift = 6 - 2 * (position % 4);
+            seq.push(BASES[((byte >> shift) & 0x3) as usize]);
+        }
+
+        let masks = self.read_blocks(
+            layout.mask_starts_offset,
+            layout.mask_sizes_offset,
+            layout.mask_block_count,
+            layout.dna_size,
+        )?;
+        Self::apply_mask_blocks(&mut seq, start, &masks);
+        let n_blocks = self.read_blocks(
+            layout.n_starts_offset,
+            layout.n_sizes_offset,
+            layout.n_block_count,
+            layout.dna_size,
+        )?;
+        Self::apply_blocks(&mut seq, start, &n_blocks, b'N');
+        Ok(seq)
     }
+}
+
+struct SequenceLayout {
+    dna_size: u64,
+    n_starts_offset: u64,
+    n_sizes_offset: u64,
+    n_block_count: usize,
+    mask_starts_offset: u64,
+    mask_sizes_offset: u64,
+    mask_block_count: usize,
+    packed_offset: u64,
+}
+
+impl Source {
+    fn len(&self) -> u64 {
+        match self {
+            Self::Bytes(data) => data.len() as u64,
+            Self::File { len, .. } => *len,
+        }
+    }
+
+    fn read_at(&self, offset: u64, len: usize) -> Result<Vec<u8>, TwoBitError> {
+        let end = self.ensure_range(offset, len)?;
+        match self {
+            Self::Bytes(data) => Ok(data[offset as usize..end as usize].to_vec()),
+            Self::File { file, .. } => {
+                let mut file = file.lock().map_err(|_| {
+                    TwoBitError::Invalid("2bit file handle lock was poisoned".to_string())
+                })?;
+                file.seek(SeekFrom::Start(offset))?;
+                let mut buffer = vec![0; len];
+                file.read_exact(&mut buffer)?;
+                Ok(buffer)
+            }
+        }
+    }
+
+    fn ensure_range(&self, offset: u64, len: usize) -> Result<u64, TwoBitError> {
+        let end = checked_add(offset, len as u64)?;
+        if end > self.len() {
+            return Err(TwoBitError::Truncated);
+        }
+        Ok(end)
+    }
+}
+
+fn read_u32_from(source: &Source, big_endian: bool, offset: u64) -> Result<u32, TwoBitError> {
+    let bytes = source.read_at(offset, 4)?;
+    let bytes: [u8; 4] = bytes.try_into().map_err(|_| TwoBitError::Truncated)?;
+    Ok(if big_endian {
+        u32::from_be_bytes(bytes)
+    } else {
+        u32::from_le_bytes(bytes)
+    })
+}
+
+fn checked_add(a: u64, b: u64) -> Result<u64, TwoBitError> {
+    a.checked_add(b)
+        .ok_or_else(|| TwoBitError::Invalid("offset overflow".to_string()))
+}
+
+fn checked_mul(a: u64, b: u64) -> Result<u64, TwoBitError> {
+    a.checked_mul(b)
+        .ok_or_else(|| TwoBitError::Invalid("offset overflow".to_string()))
+}
+
+fn bytes_for_u32s(count: usize) -> Result<u64, TwoBitError> {
+    checked_mul(count as u64, 4)
 }
 
 #[cfg(test)]
@@ -247,5 +395,14 @@ mod tests {
         assert_eq!(tb.read_slice("chr1", 0, 4).unwrap(), b"ACGT");
         assert_eq!(tb.read_slice("chr1", 10, 1000).unwrap(), b"ACAC");
         assert_eq!(tb.read_slice("chr1", -5, 3).unwrap(), b"ACG");
+    }
+
+    #[test]
+    fn file_backed_slices_match_in_memory_slices() {
+        let path = std::env::temp_dir().join(format!("phyluce-twobit-{}.2bit", std::process::id()));
+        std::fs::write(&path, build_fixture()).unwrap();
+        let tb = TwoBitFile::open(&path).unwrap();
+        assert_eq!(tb.read_slice("chr1", 3, 11).unwrap(), b"TacgtNNA");
+        std::fs::remove_file(path).unwrap();
     }
 }

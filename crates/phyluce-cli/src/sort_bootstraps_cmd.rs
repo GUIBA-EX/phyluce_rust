@@ -11,7 +11,7 @@ use std::path::Path;
 pub fn run(input: &Path, bootstrap_replicates: &Path, output: &Path) -> anyhow::Result<()> {
     let replicates = phyluce_genetrees::bootstrap::read_replicates(bootstrap_replicates)?;
 
-    println!("Reading bootstrap replicates");
+    crate::cli_info!("Reading bootstrap replicates");
     let mut all_bootreps: HashMap<String, Vec<String>> = HashMap::new();
     for entry in std::fs::read_dir(input)? {
         let dir = entry?.path();
@@ -44,7 +44,7 @@ pub fn run(input: &Path, bootstrap_replicates: &Path, output: &Path) -> anyhow::
         print!(".");
     }
 
-    println!("\nWriting bootstrap replicates");
+    crate::cli_info!("\nWriting bootstrap replicates");
     std::fs::create_dir_all(output)?;
     for (n, replicate) in replicates.iter().enumerate() {
         let out_path = output.join(format!("boot{n:03}"));
@@ -66,6 +66,6 @@ pub fn run(input: &Path, bootstrap_replicates: &Path, output: &Path) -> anyhow::
         std::fs::write(out_path, out)?;
         print!(".");
     }
-    println!();
+    crate::cli_info!();
     Ok(())
 }

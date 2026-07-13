@@ -38,6 +38,6 @@ pub fn run(
             }
         }
     }
-    println!();
+    crate::cli_info!();
     Ok(())
 }

@@ -54,7 +54,7 @@ pub fn run_probe_bed(alignments: &Path, output: &Path) -> anyhow::Result<()> {
         let Some(outname) = outname_from_filename(name) else {
             continue;
         };
-        println!("Working on {outname}");
+        crate::cli_info!("Working on {outname}");
 
         let matches = read_lastz(&file, true)?;
         let mut probes: HashMap<String, Vec<(String, i64, i64)>> = HashMap::new();
@@ -78,7 +78,7 @@ pub fn run_probe_bed(alignments: &Path, output: &Path) -> anyhow::Result<()> {
         for probe in probe_names {
             for (chromo, start, end) in &probes[probe] {
                 if written.contains(probe) {
-                    eprintln!("{probe} may have >1 hit");
+                    crate::cli_warn!("{probe} may have >1 hit");
                 } else {
                     written.insert(probe.clone());
                 }
@@ -99,7 +99,7 @@ pub fn run_locus_bed(alignments: &Path, output: &Path, regex_str: &str) -> anyho
         let Some(outname) = outname_from_filename(name) else {
             continue;
         };
-        println!("Working on {outname}");
+        crate::cli_info!("Working on {outname}");
 
         let matches = read_lastz(&file, true)?;
         // locus -> chromo -> positions
@@ -133,14 +133,14 @@ pub fn run_locus_bed(alignments: &Path, output: &Path, regex_str: &str) -> anyho
             let matches_for_locus = &loci[locus];
             for (chromo, locs) in matches_for_locus {
                 if written.contains(locus) {
-                    eprintln!("{locus} may have >1 hit");
+                    crate::cli_warn!("{locus} may have >1 hit");
                 } else {
                     written.insert(locus.clone());
                 }
                 let mn = *locs.iter().min().unwrap();
                 let mx = *locs.iter().max().unwrap();
                 if locs.len() != 2 && mx - mn > 1000 {
-                    eprintln!(
+                    crate::cli_warn!(
                         "Region ({} bp) is large for {locus} at {chromo}:{mn}-{mx}",
                         mx - mn
                     );

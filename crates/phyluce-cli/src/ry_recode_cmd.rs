@@ -68,6 +68,6 @@ pub fn run(
         std::fs::write(out_path, format_nexus(&recoded))?;
         print!(".");
     }
-    println!();
+    crate::cli_info!();
     Ok(())
 }

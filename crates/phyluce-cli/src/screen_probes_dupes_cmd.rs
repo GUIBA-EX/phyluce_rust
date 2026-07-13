@@ -51,7 +51,7 @@ pub fn run(lastz_file: &Path) -> anyhow::Result<()> {
     let mut sorted: Vec<&String> = dupes.iter().collect();
     sorted.sort();
     for d in sorted {
-        println!("{d}");
+        crate::cli_info!("{d}");
     }
     Ok(())
 }

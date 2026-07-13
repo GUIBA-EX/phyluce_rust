@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_assembly::raw_reads::{get_input_files, FileKind, ReadSet};
 use phyluce_config::PhyluceConfig;
 
@@ -40,7 +41,8 @@ fn run_velveth(velveth: &str, kmer: u32, reads: &ReadSet, output: &Path) -> anyh
     let out = std::fs::File::create(output.join(format!("velveth-k{kmer}.out.log")))?;
     let err = std::fs::File::create(output.join(format!("velveth-k{kmer}.err.log")))?;
     cmd.stdout(out).stderr(err);
-    let _ = cmd.status();
+    let status = cmd.status().context("running velveth")?;
+    anyhow::ensure!(status.success(), "velveth failed: {status}");
     Ok(())
 }
 
@@ -58,7 +60,8 @@ fn run_velvetg(velvetg: &str, kmer: u32, output: &Path) -> anyhow::Result<PathBu
     let out = std::fs::File::create(output.join(format!("velvetg-k{kmer}.out.log")))?;
     let err = std::fs::File::create(output.join(format!("velvetg-k{kmer}.err.log")))?;
     cmd.stdout(out).stderr(err);
-    let _ = cmd.status();
+    let status = cmd.status().context("running velvetg")?;
+    anyhow::ensure!(status.success(), "velvetg failed: {status}");
     Ok(output.join(name))
 }
 
@@ -74,13 +77,18 @@ fn cleanup_velvet_assembly_folder(output: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn symlink(target: &Path, link: &Path) {
-    let Some(relpth) = crate::assemblo_spades_cmd::pathdiff_pub(target, link.parent().unwrap())
-    else {
-        return;
-    };
+fn symlink(target: &Path, link: &Path) -> anyhow::Result<()> {
+    let parent = link
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("link has no parent: {}", link.display()))?;
+    let relpth = crate::assemblo_spades_cmd::pathdiff_pub(target, parent)
+        .ok_or_else(|| anyhow::anyhow!("cannot compute link target for {}", link.display()))?;
     #[cfg(unix)]
-    let _ = std::os::unix::fs::symlink(relpth, link);
+    std::os::unix::fs::symlink(relpth, link)
+        .with_context(|| format!("creating symlink {}", link.display()))?;
+    #[cfg(not(unix))]
+    anyhow::bail!("contig symlinks are only supported on Unix");
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -106,8 +114,8 @@ pub fn run(
 
     let input_data = get_input_data(config, dir)?;
     for (sample, sample_input_dir) in &input_data {
-        println!("Processing {sample}");
-        let sample_dir = output.join(sample);
+        crate::cli_info!("Processing {sample}");
+        let sample_dir = crate::output_path::output_file(output, sample)?;
         std::fs::create_dir_all(&sample_dir)?;
 
         let reads = get_input_files(sample_input_dir, subfolder)?;
@@ -121,11 +129,12 @@ pub fn run(
         }
         let contigs_file = assembly_dir.join("contigs.fa");
         if contigs_file.is_file() {
-            symlink(&contigs_file, &sample_dir.join("contigs.fasta"));
-            symlink(
-                &contigs_file,
-                &contig_dir.join(format!("{sample}.contigs.fasta")),
-            );
+            symlink(&contigs_file, &sample_dir.join("contigs.fasta"))?;
+            let link =
+                crate::output_path::output_file(&contig_dir, &format!("{sample}.contigs.fasta"))?;
+            symlink(&contigs_file, &link)?;
+        } else {
+            anyhow::bail!("Velvet did not produce contigs for sample {sample}");
         }
     }
     Ok(())

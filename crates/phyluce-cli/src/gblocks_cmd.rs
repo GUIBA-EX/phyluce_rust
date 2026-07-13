@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_align::nexus::format_nexus;
 use phyluce_config::PhyluceConfig;
 use phyluce_io::read_fasta;
@@ -59,17 +60,22 @@ pub fn run(
             .arg(format!("-b4={b4}"))
             .arg("-b5=h")
             .arg("-p=n")
-            .output();
+            .output()
+            .with_context(|| format!("running Gblocks for locus {name}"))?;
         // Gblocks conventionally exits non-zero even on success; the
         // legacy script never checks the exit code, only whether the
         // `-gb` output file exists afterward.
-        let _ = output;
 
         // Mirrors `"{}-gb".format(align_file)`: a literal `-gb` suffix
         // appended to the whole path, not an extension replacement.
         let trimmed_path = std::path::PathBuf::from(format!("{}-gb", file.display()));
         if !trimmed_path.is_file() {
-            eprintln!("Missing information for locus {name}");
+            anyhow::ensure!(
+                output.status.success(),
+                "Gblocks failed for locus {name}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            crate::cli_warn!("Missing information for locus {name}");
             print!(".");
             continue;
         }
@@ -95,6 +101,6 @@ pub fn run(
         }
         print!(".");
     }
-    println!();
+    crate::cli_info!();
     Ok(())
 }

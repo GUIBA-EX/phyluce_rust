@@ -12,6 +12,8 @@ pub enum NexusError {
     NoMatrixBlock,
     #[error("empty taxon label on a matrix line: {0:?}")]
     EmptyLabel(String),
+    #[error("{0}")]
+    InvalidAlignment(#[from] crate::AlignmentError),
 }
 
 /// Characters that force a taxon label to be single-quoted (with internal
@@ -140,7 +142,7 @@ pub fn parse_nexus(text: &str) -> Result<Alignment, NexusError> {
         seqs.entry(label).or_default().push_str(rest);
     }
 
-    Ok(Alignment {
+    let alignment = Alignment {
         rows: order
             .into_iter()
             .map(|id| {
@@ -148,7 +150,9 @@ pub fn parse_nexus(text: &str) -> Result<Alignment, NexusError> {
                 AlignmentRow { id, seq }
             })
             .collect(),
-    })
+    };
+    alignment.validate()?;
+    Ok(alignment)
 }
 
 #[cfg(test)]

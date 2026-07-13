@@ -42,11 +42,16 @@ pub fn run(config: &Path, output: &Path, subfolder: &str) -> anyhow::Result<()> 
             }
         }
 
-        let output_dir = output.join(name).join(subfolder);
+        let sample_dir = crate::output_path::output_file(output, name)?;
+        let output_dir = if subfolder.is_empty() {
+            sample_dir
+        } else {
+            crate::output_path::output_file(&sample_dir, subfolder)?
+        };
         std::fs::create_dir_all(&output_dir)?;
-        println!("Processing {name}");
+        crate::cli_info!("Processing {name}");
         for (read, files) in &all_files {
-            println!("\tProcessing read {read}");
+            crate::cli_info!("\tProcessing read {read}");
             let new_file_name = if read == "1" || read == "2" {
                 format!("{name}-READ{read}.fastq.gz")
             } else {
@@ -58,13 +63,13 @@ pub fn run(config: &Path, output: &Path, subfolder: &str) -> anyhow::Result<()> 
                 let mut input = std::fs::File::open(file)?;
                 std::io::copy(&mut input, &mut out)?;
                 if i == 0 {
-                    println!(
+                    crate::cli_info!(
                         "\t\tCopying file {} to {}",
                         file.file_name().unwrap().to_string_lossy(),
                         new_file_name
                     );
                 } else {
-                    println!(
+                    crate::cli_info!(
                         "\t\tAppending file {} to {}",
                         file.file_name().unwrap().to_string_lossy(),
                         new_file_name

@@ -5,13 +5,46 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use phyluce_config::PhyluceConfig;
 use phyluce_external::ExternalCommand;
 use phyluce_io::fastq::fastq_lengths;
 use phyluce_io::lastz::read_lastz;
 use phyluce_io::{fasta_lengths, read_fasta, validate_fasta};
 use tracing::level_filters::LevelFilter;
+
+/// Preserve CLI stdout while also recording operational messages in the
+/// optional tracing log. Commands use this rather than writing only to stdout.
+#[macro_export]
+macro_rules! cli_info {
+    () => {{
+        use std::io::Write as _;
+        writeln!(std::io::stdout())?;
+        tracing::info!(message = "");
+    }};
+    ($($arg:tt)*) => {{
+        let message = format!($($arg)*);
+        use std::io::Write as _;
+        writeln!(std::io::stdout(), "{message}")?;
+        tracing::info!(message = %message);
+    }};
+}
+
+/// Preserve CLI stderr while also recording warnings in the optional log.
+#[macro_export]
+macro_rules! cli_warn {
+    () => {{
+        use std::io::Write as _;
+        writeln!(std::io::stderr())?;
+        tracing::warn!(message = "");
+    }};
+    ($($arg:tt)*) => {{
+        let message = format!($($arg)*);
+        use std::io::Write as _;
+        writeln!(std::io::stderr(), "{message}")?;
+        tracing::warn!(message = %message);
+    }};
+}
 
 mod align_summary_cmd;
 mod assemblo_abyss_cmd;
@@ -52,6 +85,7 @@ mod move_align_cmd;
 mod multi_fasta_table_cmd;
 mod multi_merge_table_cmd;
 mod ncbi_prep_cmd;
+mod output_path;
 mod probe_bed_from_lastz_cmd;
 mod randomly_sample_concat_cmd;
 mod reconstruct_uce_from_probe_cmd;
@@ -298,8 +332,12 @@ enum ProbeAction {
         tiling_density: f64,
         #[arg(long)]
         masking: Option<f64>,
-        #[arg(long, default_value_t = true)]
-        do_not_remove_ambiguous: bool,
+        #[arg(
+            long = "do-not-remove-ambiguous",
+            default_value_t = true,
+            action = ArgAction::SetFalse
+        )]
+        remove_ambiguous: bool,
         #[arg(long, default_value_t = false)]
         remove_gc: bool,
         #[arg(long, default_value_t = 1)]
@@ -334,8 +372,12 @@ enum ProbeAction {
         locus_bed: Option<PathBuf>,
         #[arg(long)]
         masking: Option<f64>,
-        #[arg(long, default_value_t = true)]
-        do_not_remove_ambiguous: bool,
+        #[arg(
+            long = "do-not-remove-ambiguous",
+            default_value_t = true,
+            action = ArgAction::SetFalse
+        )]
+        remove_ambiguous: bool,
         #[arg(long, default_value_t = false)]
         remove_gc: bool,
         #[arg(long, default_value_t = 0)]
@@ -343,16 +385,18 @@ enum ProbeAction {
         #[arg(long, default_value_t = false)]
         two_probes: bool,
     },
-    /// Equivalent to `phyluce_probe_reconstruct_uce_from_probe`. Uses MAFFT
-    /// instead of MUSCLE for multi-probe loci (MUSCLE isn't available in
-    /// this environment) -- see `reconstruct_uce_from_probe_cmd` docs.
-    /// `--mafft-binary` is only required if the probe set has multi-probe
-    /// loci.
+    /// Equivalent to `phyluce_probe_reconstruct_uce_from_probe`. Multi-probe
+    /// loci use MAFFT by default; MUSCLE 3 is available as an explicit legacy
+    /// compatibility path.
     ReconstructUceFromProbe {
         #[arg(long)]
         input: PathBuf,
         #[arg(long)]
         output: PathBuf,
+        /// Explicitly use the legacy MUSCLE 3 `-clwstrict` path.
+        #[arg(long)]
+        muscle_binary: Option<String>,
+        /// Override the default MAFFT executable.
         #[arg(long)]
         mafft_binary: Option<String>,
     },
@@ -995,7 +1039,11 @@ enum AlignAction {
         verbatim: bool,
         #[arg(long, default_value = "nexus")]
         input_format: String,
-        #[arg(long, default_value_t = true)]
+        #[arg(
+            long = "no-check-missing",
+            default_value_t = true,
+            action = ArgAction::SetFalse
+        )]
         check_missing: bool,
     },
     /// Equivalent to `phyluce_align_remove_empty_taxa`.
@@ -1378,11 +1426,17 @@ struct SharedLogWriterGuard {
 
 impl std::io::Write for SharedLogWriterGuard {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.file.lock().unwrap().write(buf)
+        self.file
+            .lock()
+            .map_err(|_| std::io::Error::other("log file lock was poisoned"))?
+            .write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.file.lock().unwrap().flush()
+        self.file
+            .lock()
+            .map_err(|_| std::io::Error::other("log file lock was poisoned"))?
+            .flush()
     }
 }
 
@@ -1410,7 +1464,8 @@ fn init_file_logging(
         .with_target(false)
         .with_max_level(max_level)
         .finish();
-    let _ = tracing::subscriber::set_global_default(subscriber);
+    tracing::subscriber::set_global_default(subscriber)
+        .map_err(|err| anyhow::anyhow!("initializing tracing subscriber: {err}"))?;
     Ok(())
 }
 
@@ -1434,52 +1489,300 @@ fn expand_legacy_argv(args: Vec<OsString>) -> Vec<OsString> {
 }
 
 fn legacy_command_prefix(program: &str) -> Option<&'static [&'static str]> {
-    match program {
-        "phyluce_align_convert_degen_bases" => Some(&["align", "convert-degen-bases"]),
-        "phyluce_align_explode_alignments" => Some(&["align", "explode-alignments"]),
-        "phyluce_align_extract_taxon_fasta_from_alignments" => {
-            Some(&["align", "extract-taxon-fasta-from-alignments"])
-        }
-        "phyluce_align_format_concatenated_phylip_for_paml" => {
-            Some(&["align", "format-concatenated-phylip-for-paml"])
-        }
-        "phyluce_align_get_incomplete_matrix_estimates" => {
-            Some(&["align", "get-incomplete-matrix-estimates"])
-        }
-        "phyluce_align_get_only_loci_with_min_taxa" => {
-            Some(&["align", "get-only-loci-with-min-taxa"])
-        }
-        "phyluce_align_get_taxon_locus_counts_in_alignments" => {
-            Some(&["align", "get-taxon-locus-counts-in-alignments"])
-        }
-        "phyluce_align_move_align_by_conf_file" => Some(&["align", "move-align-by-conf-file"]),
-        "phyluce_align_randomly_sample_and_concatenate" => {
-            Some(&["align", "randomly-sample-and-concatenate"])
-        }
-        "phyluce_align_reduce_alignments_with_raxml" => {
-            Some(&["align", "reduce-alignments-with-raxml"])
-        }
-        "phyluce_align_remove_locus_name_from_files" => {
-            Some(&["align", "remove-locus-name-from-files"])
-        }
-        "phyluce_align_screen_alignments_for_problems" => {
-            Some(&["align", "screen-alignments-for-problems"])
-        }
-        "phyluce_align_get_smilogram_from_alignments" => {
-            Some(&["align", "get-smilogram-from-alignments"])
-        }
-        "phyluce_assembly_screen_probes_for_dupes" => {
-            Some(&["assembly", "screen-probes-for-dupes"])
-        }
-        "phyluce_assembly_extract_contigs_to_barcodes" => {
-            Some(&["assembly", "extract-contigs-to-barcodes"])
-        }
-        "phyluce_assembly_match_contigs_to_barcodes" => {
-            Some(&["assembly", "match-contigs-to-barcodes"])
-        }
-        _ => None,
-    }
+    LEGACY_COMMANDS
+        .iter()
+        .find_map(|(name, prefix)| (*name == program).then_some(*prefix))
 }
+
+const LEGACY_COMMANDS: &[(&str, &[&str])] = &[
+    (
+        "phyluce_align_add_missing_data_designators",
+        &["align", "add-missing-data-designators"],
+    ),
+    (
+        "phyluce_align_concatenate_alignments",
+        &["align", "concatenate-alignments"],
+    ),
+    (
+        "phyluce_align_convert_degen_bases",
+        &["align", "convert-degen-bases"],
+    ),
+    (
+        "phyluce_align_convert_one_align_to_another",
+        &["align", "convert-one-align-to-another"],
+    ),
+    (
+        "phyluce_align_explode_alignments",
+        &["align", "explode-alignments"],
+    ),
+    (
+        "phyluce_align_extract_taxa_from_alignments",
+        &["align", "extract-taxa-from-alignments"],
+    ),
+    (
+        "phyluce_align_extract_taxon_fasta_from_alignments",
+        &["align", "extract-taxon-fasta-from-alignments"],
+    ),
+    (
+        "phyluce_align_filter_alignments",
+        &["align", "filter-alignments"],
+    ),
+    (
+        "phyluce_align_format_concatenated_phylip_for_paml",
+        &["align", "format-concatenated-phylip-for-paml"],
+    ),
+    (
+        "phyluce_align_get_align_summary_data",
+        &["align", "get-align-summary-data"],
+    ),
+    (
+        "phyluce_align_get_gblocks_trimmed_alignments_from_untrimmed",
+        &["align", "get-gblocks-trimmed-alignments-from-untrimmed"],
+    ),
+    (
+        "phyluce_align_get_incomplete_matrix_estimates",
+        &["align", "get-incomplete-matrix-estimates"],
+    ),
+    (
+        "phyluce_align_get_informative_sites",
+        &["align", "get-informative-sites"],
+    ),
+    (
+        "phyluce_align_get_only_loci_with_min_taxa",
+        &["align", "get-only-loci-with-min-taxa"],
+    ),
+    (
+        "phyluce_align_get_ry_recoded_alignments",
+        &["align", "get-ry-recoded-alignments"],
+    ),
+    (
+        "phyluce_align_get_smilogram_from_alignments",
+        &["align", "get-smilogram-from-alignments"],
+    ),
+    (
+        "phyluce_align_get_taxon_locus_counts_in_alignments",
+        &["align", "get-taxon-locus-counts-in-alignments"],
+    ),
+    (
+        "phyluce_align_get_trimal_trimmed_alignments_from_untrimmed",
+        &["align", "get-trimal-trimmed-alignments-from-untrimmed"],
+    ),
+    (
+        "phyluce_align_get_trimmed_alignments_from_untrimmed",
+        &["align", "get-trimmed-alignments-from-untrimmed"],
+    ),
+    (
+        "phyluce_align_move_align_by_conf_file",
+        &["align", "move-align-by-conf-file"],
+    ),
+    (
+        "phyluce_align_randomly_sample_and_concatenate",
+        &["align", "randomly-sample-and-concatenate"],
+    ),
+    (
+        "phyluce_align_reduce_alignments_with_raxml",
+        &["align", "reduce-alignments-with-raxml"],
+    ),
+    (
+        "phyluce_align_remove_empty_taxa",
+        &["align", "remove-empty-taxa"],
+    ),
+    (
+        "phyluce_align_remove_locus_name_from_files",
+        &["align", "remove-locus-name-from-files"],
+    ),
+    (
+        "phyluce_align_screen_alignments_for_problems",
+        &["align", "screen-alignments-for-problems"],
+    ),
+    ("phyluce_align_seqcap_align", &["align", "seqcap-align"]),
+    (
+        "phyluce_align_split_concat_nexus_to_loci",
+        &["align", "split-concat-nexus-to-loci"],
+    ),
+    (
+        "phyluce_assembly_assemblo_abyss",
+        &["assembly", "assemblo-abyss"],
+    ),
+    (
+        "phyluce_assembly_assemblo_spades",
+        &["assembly", "assemblo-spades"],
+    ),
+    (
+        "phyluce_assembly_assemblo_velvet",
+        &["assembly", "assemblo-velvet"],
+    ),
+    (
+        "phyluce_assembly_explode_get_fastas_file",
+        &["assembly", "explode-get-fastas-file"],
+    ),
+    (
+        "phyluce_assembly_extract_contigs_to_barcodes",
+        &["assembly", "extract-contigs-to-barcodes"],
+    ),
+    (
+        "phyluce_assembly_get_bed_from_lastz",
+        &["assembly", "get-bed-from-lastz"],
+    ),
+    (
+        "phyluce_assembly_get_fasta_lengths",
+        &["assembly", "get-fasta-lengths"],
+    ),
+    (
+        "phyluce_assembly_get_fastas_from_match_counts",
+        &["assembly", "get-fastas-from-match-counts"],
+    ),
+    (
+        "phyluce_assembly_get_fastq_lengths",
+        &["assembly", "get-fastq-lengths"],
+    ),
+    (
+        "phyluce_assembly_get_match_counts",
+        &["assembly", "get-match-counts"],
+    ),
+    (
+        "phyluce_assembly_match_contigs_to_barcodes",
+        &["assembly", "match-contigs-to-barcodes"],
+    ),
+    (
+        "phyluce_assembly_match_contigs_to_probes",
+        &["assembly", "match-contigs-to-probes"],
+    ),
+    (
+        "phyluce_assembly_screen_probes_for_dupes",
+        &["assembly", "screen-probes-for-dupes"],
+    ),
+    (
+        "phyluce_genetrees_generate_multilocus_bootstrap_count",
+        &["genetrees", "generate-multilocus-bootstrap-count"],
+    ),
+    (
+        "phyluce_genetrees_get_mean_bootrep_support",
+        &["genetrees", "get-mean-bootrep-support"],
+    ),
+    (
+        "phyluce_genetrees_get_tree_counts",
+        &["genetrees", "get-tree-counts"],
+    ),
+    (
+        "phyluce_genetrees_rename_tree_leaves",
+        &["genetrees", "rename-tree-leaves"],
+    ),
+    (
+        "phyluce_genetrees_sort_multilocus_bootstraps",
+        &["genetrees", "sort-multilocus-bootstraps"],
+    ),
+    (
+        "phyluce_ncbi_chunk_fasta_for_ncbi",
+        &["ncbi", "chunk-fasta-for-ncbi"],
+    ),
+    (
+        "phyluce_ncbi_prep_uce_align_files_for_ncbi",
+        &["ncbi", "prep-uce-align-files-for-ncbi"],
+    ),
+    ("phyluce_probe_easy_lastz", &["probe", "easy-lastz"]),
+    (
+        "phyluce_probe_get_genome_sequences_from_bed",
+        &["probe", "get-genome-sequences-from-bed"],
+    ),
+    (
+        "phyluce_probe_get_locus_bed_from_lastz_files",
+        &["probe", "get-locus-bed-from-lastz-files"],
+    ),
+    (
+        "phyluce_probe_get_multi_fasta_table",
+        &["probe", "get-multi-fasta-table"],
+    ),
+    (
+        "phyluce_probe_get_multi_merge_table",
+        &["probe", "get-multi-merge-table"],
+    ),
+    (
+        "phyluce_probe_get_probe_bed_from_lastz_files",
+        &["probe", "get-probe-bed-from-lastz-files"],
+    ),
+    (
+        "phyluce_probe_get_screened_loci_by_proximity",
+        &["probe", "get-screened-loci-by-proximity"],
+    ),
+    (
+        "phyluce_probe_get_subsets_of_tiled_probes",
+        &["probe", "get-subsets-of-tiled-probes"],
+    ),
+    (
+        "phyluce_probe_get_tiled_probe_from_multiple_inputs",
+        &["probe", "get-tiled-probe-from-multiple-inputs"],
+    ),
+    (
+        "phyluce_probe_get_tiled_probes",
+        &["probe", "get-tiled-probes"],
+    ),
+    (
+        "phyluce_probe_query_multi_fasta_table",
+        &["probe", "query-multi-fasta-table"],
+    ),
+    (
+        "phyluce_probe_query_multi_merge_table",
+        &["probe", "query-multi-merge-table"],
+    ),
+    (
+        "phyluce_probe_reconstruct_uce_from_probe",
+        &["probe", "reconstruct-uce-from-probe"],
+    ),
+    (
+        "phyluce_probe_remove_duplicate_hits_from_probes_using_lastz",
+        &["probe", "remove-duplicate-hits-from-probes-using-lastz"],
+    ),
+    (
+        "phyluce_probe_remove_overlapping_probes_given_config",
+        &["probe", "remove-overlapping-probes-given-config"],
+    ),
+    (
+        "phyluce_probe_run_multiple_lastzs_sqlite",
+        &["probe", "run-multiple-lastzs-sqlite"],
+    ),
+    (
+        "phyluce_probe_slice_sequence_from_genomes",
+        &["probe", "slice-sequence-from-genomes"],
+    ),
+    (
+        "phyluce_probe_strip_masked_loci_from_set",
+        &["probe", "strip-masked-loci-from-set"],
+    ),
+    (
+        "phyluce_utilities_combine_reads",
+        &["utilities", "combine-reads"],
+    ),
+    (
+        "phyluce_utilities_filter_bed_by_fasta",
+        &["utilities", "filter-bed-by-fasta"],
+    ),
+    (
+        "phyluce_utilities_get_bed_from_fasta",
+        &["utilities", "get-bed-from-fasta"],
+    ),
+    (
+        "phyluce_utilities_merge_multiple_gzip_files",
+        &["utilities", "merge-multiple-gzip-files"],
+    ),
+    (
+        "phyluce_utilities_merge_next_seq_gzip_files",
+        &["utilities", "merge-next-seq-gzip-files"],
+    ),
+    (
+        "phyluce_utilities_replace_many_links",
+        &["utilities", "replace-many-links"],
+    ),
+    (
+        "phyluce_utilities_sample_reads_from_files",
+        &["utilities", "sample-reads-from-files"],
+    ),
+    (
+        "phyluce_utilities_unmix_fasta_reads",
+        &["utilities", "unmix-fasta-reads"],
+    ),
+    ("phyluce_workflow", &["workflow"]),
+];
 
 fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
     match action {
@@ -1557,7 +1860,7 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
             probe_length,
             tiling_density,
             masking,
-            do_not_remove_ambiguous,
+            remove_ambiguous,
             remove_gc,
             start_index,
             two_probes,
@@ -1569,7 +1872,7 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
                 length: probe_length,
                 density: tiling_density,
                 mask: masking,
-                remove_ambiguous: do_not_remove_ambiguous,
+                remove_ambiguous,
                 remove_gc,
                 start_index,
                 two_probes,
@@ -1588,7 +1891,7 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
             probe_bed,
             locus_bed,
             masking,
-            do_not_remove_ambiguous,
+            remove_ambiguous,
             remove_gc,
             start_index,
             two_probes,
@@ -1605,7 +1908,7 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
                 density: tiling_density,
                 overlap_flush_left: overlap == "flush-left",
                 mask: masking,
-                remove_ambiguous: do_not_remove_ambiguous,
+                remove_ambiguous,
                 remove_gc,
                 start_index,
                 two_probes,
@@ -1621,8 +1924,14 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
         ProbeAction::ReconstructUceFromProbe {
             input,
             output,
+            muscle_binary,
             mafft_binary,
-        } => reconstruct_uce_from_probe_cmd::run(&input, &output, mafft_binary.as_deref()),
+        } => reconstruct_uce_from_probe_cmd::run(
+            &input,
+            &output,
+            muscle_binary.as_deref(),
+            mafft_binary.as_deref(),
+        ),
         ProbeAction::GetGenomeSequencesFromBed {
             bed,
             twobit,
@@ -2065,14 +2374,14 @@ fn run_config(action: ConfigAction) -> anyhow::Result<()> {
     let cfg = PhyluceConfig::load()?;
     match action {
         ConfigAction::Inspect => {
-            println!(
+            crate::cli_info!(
                 "default config: {}",
                 cfg.default_path
                     .as_ref()
                     .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "<none>".to_string())
+                    .unwrap_or_else(|| "<embedded>".to_string())
             );
-            println!(
+            crate::cli_info!(
                 "user config:    {}",
                 cfg.user_path
                     .as_ref()
@@ -2080,17 +2389,17 @@ fn run_config(action: ConfigAction) -> anyhow::Result<()> {
                     .unwrap_or_else(|| "<none>".to_string())
             );
             for section in cfg.section_names() {
-                println!("[{section}]");
+                crate::cli_info!("[{section}]");
                 if let Some(values) = cfg.get_all_user_params(section) {
                     for v in values {
-                        println!("  {v}");
+                        crate::cli_info!("  {v}");
                     }
                 }
             }
         }
         ConfigAction::Which { program, binary } => {
             let resolved = cfg.get_user_path(&program, &binary)?;
-            println!("{resolved}");
+            crate::cli_info!("{resolved}");
         }
     }
     Ok(())
@@ -2101,14 +2410,14 @@ fn run_io(action: IoAction) -> anyhow::Result<()> {
         IoAction::ValidateFasta { input } => {
             let issues = validate_fasta(&input)?;
             if issues.is_empty() {
-                println!("OK: {} is well-formed FASTA", input.display());
+                crate::cli_info!("OK: {} is well-formed FASTA", input.display());
                 Ok(())
             } else {
                 for issue in &issues {
                     if issue.line > 0 {
-                        eprintln!("{}:{}: {}", input.display(), issue.line, issue.message);
+                        crate::cli_warn!("{}:{}: {}", input.display(), issue.line, issue.message);
                     } else {
-                        eprintln!("{}: {}", input.display(), issue.message);
+                        crate::cli_warn!("{}: {}", input.display(), issue.message);
                     }
                 }
                 anyhow::bail!("{} issue(s) found in {}", issues.len(), input.display());
@@ -2123,12 +2432,14 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
             let lengths = fasta_lengths(&input)?;
             let report = stats::LengthReport::from_lengths(&lengths);
             if csv {
-                println!(
+                crate::cli_info!(
                     "{}",
                     report.to_csv_row(&input.file_name().unwrap_or_default().to_string_lossy())
                 );
             } else {
-                print!("{}", report.to_human_report());
+                let message = report.to_human_report();
+                print!("{message}");
+                tracing::info!(message = %message);
             }
             Ok(())
         }
@@ -2161,9 +2472,11 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
 
             let report = stats::FastqLengthReport::from_lengths(&lengths);
             if csv {
-                println!("{}", report.to_csv_row(&last_basename));
+                crate::cli_info!("{}", report.to_csv_row(&last_basename));
             } else {
-                print!("{}", report.to_human_report());
+                let message = report.to_human_report();
+                print!("{message}");
+                tracing::info!(message = %message);
             }
             Ok(())
         }
@@ -2381,7 +2694,7 @@ fn run_get_bed_from_lastz(
                 writeln!(out, "{}\t{}\t{}\t{}", m.name1, m.zstart1, m.end1, name)?;
             }
         } else {
-            println!("{name}");
+            crate::cli_info!("{name}");
         }
     }
     Ok(())
@@ -2479,10 +2792,13 @@ fn run_external(action: ExternalAction) -> anyhow::Result<()> {
         ExternalAction::Check { program, binary } => {
             let cfg = PhyluceConfig::load()?;
             let resolved = cfg.get_user_path(&program, &binary)?;
-            println!("resolved: {resolved}");
+            crate::cli_info!("resolved: {resolved}");
             let report = ExternalCommand::new(&resolved).arg("--version").run()?;
-            println!("exit code: {:?}", report.exit_code);
+            crate::cli_info!("exit code: {:?}", report.exit_code);
             print!("{}", report.stdout);
+            if !report.stdout.is_empty() {
+                tracing::info!(external_stdout = %report.stdout);
+            }
             Ok(())
         }
     }
@@ -2513,6 +2829,37 @@ mod cli_compat_tests {
     }
 
     #[test]
+    fn maps_every_legacy_executable() {
+        assert_eq!(LEGACY_COMMANDS.len(), 74);
+        for (program, prefix) in LEGACY_COMMANDS {
+            let mut args = vec!["phyluce"];
+            args.extend_from_slice(prefix);
+            args.push("--help");
+            let error = match Cli::try_parse_from(args) {
+                Ok(_) => panic!("legacy mapping target did not display help: {program}"),
+                Err(error) => error,
+            };
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp,
+                "{program}"
+            );
+        }
+        assert_eq!(
+            legacy_command_prefix("phyluce_assembly_get_fasta_lengths"),
+            Some(&["assembly", "get-fasta-lengths"][..])
+        );
+        assert_eq!(
+            legacy_command_prefix("phyluce_probe_easy_lastz"),
+            Some(&["probe", "easy-lastz"][..])
+        );
+        assert_eq!(
+            legacy_command_prefix("phyluce_workflow"),
+            Some(&["workflow"][..])
+        );
+    }
+
+    #[test]
     fn leaves_native_cli_args_unchanged() {
         let args = vec![
             OsString::from("phyluce"),
@@ -2520,5 +2867,73 @@ mod cli_compat_tests {
             OsString::from("convert-degen-bases"),
         ];
         assert_eq!(expand_legacy_argv(args.clone()), args);
+    }
+
+    #[test]
+    fn inverse_boolean_flags_change_their_documented_defaults() {
+        let base = [
+            "phyluce",
+            "probe",
+            "get-tiled-probes",
+            "--input",
+            "in.fasta",
+            "--output",
+            "out.fasta",
+            "--probe-prefix",
+            "uce-",
+            "--designer",
+            "tester",
+            "--design",
+            "test",
+        ];
+        let cli = Cli::try_parse_from(base).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Probe {
+                action: ProbeAction::GetTiledProbes {
+                    remove_ambiguous: true,
+                    ..
+                }
+            }
+        ));
+
+        let mut with_flag = base.to_vec();
+        with_flag.push("--do-not-remove-ambiguous");
+        let cli = Cli::try_parse_from(with_flag).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Probe {
+                action: ProbeAction::GetTiledProbes {
+                    remove_ambiguous: false,
+                    ..
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn no_check_missing_disables_missing_locus_validation() {
+        let cli = Cli::try_parse_from([
+            "phyluce",
+            "align",
+            "add-missing-data-designators",
+            "--alignments",
+            "in",
+            "--output",
+            "out",
+            "--match-count-output",
+            "matches.conf",
+            "--no-check-missing",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Align {
+                action: AlignAction::AddMissingDataDesignators {
+                    check_missing: false,
+                    ..
+                }
+            }
+        ));
     }
 }

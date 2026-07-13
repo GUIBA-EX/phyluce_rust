@@ -13,7 +13,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from common import find_python_repo
+REPO_ROOT = find_python_repo()
 ALIGNMENTS = REPO_ROOT / "phyluce/tests/test-expected/mafft-gblocks-clean"
 EXPECTED = REPO_ROOT / "phyluce/tests/test-expected/mafft-gblocks-clean-informative-sites.csv"
 

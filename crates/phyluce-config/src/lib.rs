@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::env;
 use std::path::{Path, PathBuf};
 
+const EMBEDDED_DEFAULT_CONFIG: &str = include_str!("../../../config/phyluce.conf");
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("config file not found: searched {0:?}")]
@@ -43,11 +45,21 @@ impl Ini {
     /// Parse phyluce's flavor of ini: `[section]` headers, `key:value` or
     /// `key=value` pairs, `#` full-line comments, blank lines ignored.
     pub fn parse(text: &str) -> Self {
+        Self::parse_impl(text, false)
+    }
+
+    /// Parse the same INI format while retaining bare values as keys with an
+    /// empty value, matching ConfigParser's `allow_no_value=True` mode.
+    pub fn parse_allow_no_value(text: &str) -> Self {
+        Self::parse_impl(text, true)
+    }
+
+    fn parse_impl(text: &str, allow_no_value: bool) -> Self {
         let mut ini = Ini::default();
         let mut current: Option<String> = None;
         for raw_line in text.lines() {
             let line = raw_line.trim();
-            if line.is_empty() || line.starts_with('#') {
+            if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
                 continue;
             }
             if line.starts_with('[') && line.ends_with(']') {
@@ -57,11 +69,19 @@ impl Ini {
                 continue;
             }
             let Some(section) = &current else { continue };
-            let sep_pos = line.find(':').or_else(|| line.find('='));
+            let sep_pos = match (line.find(':'), line.find('=')) {
+                (Some(colon), Some(equals)) => Some(colon.min(equals)),
+                (Some(colon), None) => Some(colon),
+                (None, Some(equals)) => Some(equals),
+                (None, None) => None,
+            };
             if let Some(pos) = sep_pos {
                 let key = line[..pos].trim().to_string();
                 let value = line[pos + 1..].trim().to_string();
                 ini.ensure_section(section).push((key, value));
+            } else if allow_no_value {
+                ini.ensure_section(section)
+                    .push((line.to_string(), String::new()));
             }
         }
         ini
@@ -134,10 +154,14 @@ impl PhyluceConfig {
     /// Same as [`load`], but load only the packaged/default config -- mirrors
     /// `pth.get_user_path(..., package_only=True)`.
     pub fn load_package_only() -> Result<Self, ConfigError> {
-        let default_path = Self::find_default_config()?;
-        let ini = Ini::parse(&std::fs::read_to_string(&default_path)?);
+        let default_path = Self::find_default_config();
+        let text = match &default_path {
+            Some(path) => std::fs::read_to_string(path)?,
+            None => EMBEDDED_DEFAULT_CONFIG.to_string(),
+        };
+        let ini = Ini::parse(&text);
         Ok(Self {
-            default_path: Some(default_path),
+            default_path,
             user_path: None,
             ini,
         })
@@ -145,10 +169,14 @@ impl PhyluceConfig {
 
     fn load_from(explicit: Option<PathBuf>) -> Result<Self, ConfigError> {
         let default_path = match explicit {
-            Some(p) => p,
-            None => Self::find_default_config()?,
+            Some(path) => Some(path),
+            None => Self::find_default_config(),
         };
-        let mut ini = Ini::parse(&std::fs::read_to_string(&default_path)?);
+        let text = match &default_path {
+            Some(path) => std::fs::read_to_string(path)?,
+            None => EMBEDDED_DEFAULT_CONFIG.to_string(),
+        };
+        let mut ini = Ini::parse(&text);
 
         let user_path = dirs_home().map(|h| h.join(".phyluce.conf"));
         if let Some(up) = &user_path {
@@ -159,13 +187,13 @@ impl PhyluceConfig {
         }
 
         Ok(Self {
-            default_path: Some(default_path),
+            default_path,
             user_path,
             ini,
         })
     }
 
-    fn find_default_config() -> Result<PathBuf, ConfigError> {
+    fn find_default_config() -> Option<PathBuf> {
         let mut candidates = Vec::new();
 
         if let Ok(p) = env::var("PHYLUCE_CONFIG") {
@@ -185,10 +213,10 @@ impl PhyluceConfig {
 
         for c in &candidates {
             if c.is_file() {
-                return Ok(c.clone());
+                return Some(c.clone());
             }
         }
-        Err(ConfigError::NotFound(candidates))
+        None
     }
 
     /// Mirrors `pth.get_user_path`: fetch `[program] binary:path`, expanding
@@ -236,7 +264,14 @@ impl PhyluceConfig {
 }
 
 fn conda_prefix() -> Option<PathBuf> {
-    env::var("CONDA_PREFIX").ok().map(PathBuf::from)
+    env::var("CONDA_PREFIX")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            let executable = env::current_exe().ok()?;
+            let bin_dir = executable.parent()?;
+            bin_dir.parent().map(Path::to_path_buf)
+        })
 }
 
 fn dirs_home() -> Option<PathBuf> {
@@ -267,6 +302,21 @@ mod tests {
     }
 
     #[test]
+    fn uses_the_first_delimiter_and_can_keep_bare_values() {
+        let ini = Ini::parse("[binaries]\nmafft=/opt/tools:v2/mafft\n");
+        assert_eq!(ini.get("binaries", "mafft").unwrap(), "/opt/tools:v2/mafft");
+
+        let ini = Ini::parse_allow_no_value("[loci]\nuce-1\nuce-2\n");
+        assert_eq!(
+            ini.entries("loci").unwrap(),
+            &[
+                ("uce-1".to_string(), String::new()),
+                ("uce-2".to_string(), String::new())
+            ]
+        );
+    }
+
+    #[test]
     fn user_config_overrides_default() {
         let mut base = Ini::parse("[binaries]\nlastz:$CONDA/bin/lastz\n");
         let user = Ini::parse("[binaries]\nlastz:/custom/lastz\n");
@@ -287,5 +337,25 @@ mod tests {
             cfg.get_user_path("binaries", "lastz").unwrap(),
             "/opt/conda/envs/phyluce/bin/lastz"
         );
+    }
+
+    #[test]
+    fn embedded_config_contains_required_sections() {
+        let ini = Ini::parse(EMBEDDED_DEFAULT_CONFIG);
+        assert_eq!(ini.get("binaries", "lastz").unwrap(), "$CONDA/bin/lastz");
+        assert_eq!(
+            ini.get("binaries", "raxmlHPC-SSE3").unwrap(),
+            "$CONDA/bin/raxmlHPC-SSE3"
+        );
+        assert_eq!(
+            ini.get("binaries", "raxml-ng").unwrap(),
+            "$CONDA/bin/raxml-ng"
+        );
+        assert_eq!(ini.get("spades", "cov_cutoff").unwrap(), "5");
+        assert!(ini
+            .all_values("headers")
+            .unwrap()
+            .join("|")
+            .contains("NODE_"));
     }
 }

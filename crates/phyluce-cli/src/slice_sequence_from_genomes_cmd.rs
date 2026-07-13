@@ -159,7 +159,10 @@ pub fn run(
         if args.exclude.contains(&genome.short_name) {
             continue;
         }
-        let out_name = output_dir.join(format!("{}.fasta", genome.short_name.to_lowercase()));
+        let out_name = crate::output_path::output_file(
+            output_dir,
+            &format!("{}.fasta", genome.short_name.to_lowercase()),
+        )?;
         let mut outf = std::fs::File::create(&out_name)?;
 
         let tb = TwoBitFile::open(&genome.twobit_path)?;
@@ -265,7 +268,7 @@ pub fn run(
             node_count += 1;
         }
 
-        eprintln!(
+        crate::cli_warn!(
             "{}: {} uces, {} dupes, {} non-dupes, {} orient drop, {} length drop, {node_count} written",
             genome.short_name,
             all_uce_names.len(),

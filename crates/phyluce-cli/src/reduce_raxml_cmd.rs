@@ -47,6 +47,6 @@ pub fn run(alignments_dir: &Path, output_dir: &Path, input_format: &str) -> anyh
         std::fs::remove_dir_all(&tdir)?;
         print!(".");
     }
-    println!();
+    crate::cli_info!();
     Ok(())
 }

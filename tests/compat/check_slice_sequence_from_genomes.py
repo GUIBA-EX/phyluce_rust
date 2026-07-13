@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from common import RUST_ROOT
 SIGNATURE = 0x1A412743
 BASE_CODE = {"T": 0, "C": 1, "A": 2, "G": 3}
 
@@ -73,7 +73,7 @@ def lastz_long_line(name1, strand1, zstart1, end1, length1, name2, strand2, zsta
 
 def main():
     rust_bin = Path(
-        sys.argv[1] if len(sys.argv) > 1 else REPO_ROOT / "rust/target/debug/phyluce"
+        sys.argv[1] if len(sys.argv) > 1 else RUST_ROOT / "target/debug/phyluce"
     ).resolve()
     if not rust_bin.is_file():
         print(f"Rust binary not found at {rust_bin}", file=sys.stderr)

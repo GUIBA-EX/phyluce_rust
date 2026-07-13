@@ -16,6 +16,35 @@
 
 use crate::{Alignment, AlignmentRow};
 
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum TrimParameterError {
+    #[error("trim window must be greater than zero")]
+    ZeroWindow,
+    #[error("{name} must be a finite value between 0 and 1 (inclusive), got {value}")]
+    InvalidProportion { name: &'static str, value: f64 },
+}
+
+pub fn validate_trim_parameters(
+    window_size: usize,
+    proportion: f64,
+    threshold: f64,
+    max_divergence: f64,
+) -> Result<(), TrimParameterError> {
+    if window_size == 0 {
+        return Err(TrimParameterError::ZeroWindow);
+    }
+    for (name, value) in [
+        ("proportion", proportion),
+        ("threshold", threshold),
+        ("max divergence", max_divergence),
+    ] {
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            return Err(TrimParameterError::InvalidProportion { name, value });
+        }
+    }
+    Ok(())
+}
+
 /// `round()`-half-to-even, matching Python 3's float rounding used for
 /// `int(round(proportion * taxa, 0))`.
 fn python_round(x: f64) -> i64 {
@@ -357,6 +386,18 @@ mod tests {
         assert_eq!(python_round(2.5), 2);
         assert_eq!(python_round(3.5), 4);
         assert_eq!(python_round(3.25), 3);
+    }
+
+    #[test]
+    fn rejects_invalid_trim_parameters() {
+        assert_eq!(
+            validate_trim_parameters(0, 0.65, 0.65, 0.4),
+            Err(TrimParameterError::ZeroWindow)
+        );
+        assert!(validate_trim_parameters(20, f64::NAN, 0.65, 0.4).is_err());
+        assert!(validate_trim_parameters(20, 0.65, 1.1, 0.4).is_err());
+        assert!(validate_trim_parameters(20, 0.65, 0.65, -0.1).is_err());
+        assert!(validate_trim_parameters(20, 0.65, 0.65, 0.4).is_ok());
     }
 
     #[test]

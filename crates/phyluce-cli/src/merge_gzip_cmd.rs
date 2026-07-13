@@ -19,12 +19,12 @@ pub fn run(config: &Path, output: &Path, section: &str, trimmed: bool) -> anyhow
     for (name, files) in &items {
         let mut sorted_files = files.clone();
         sorted_files.sort();
-        let out_path = output.join(name);
+        let out_path = crate::output_path::output_file(output, name)?;
         let mut out = std::fs::File::create(&out_path)?;
         for infile in &sorted_files {
             let mut input = std::fs::File::open(infile)?;
             std::io::copy(&mut input, &mut out)?;
-            println!(
+            crate::cli_info!(
                 "Copied {} to {}",
                 Path::new(infile).file_name().unwrap().to_string_lossy(),
                 name

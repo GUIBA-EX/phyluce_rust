@@ -71,7 +71,7 @@ fn merge_read(input_dir: &Path, output: &Path, sample: &str, read: &str) -> anyh
     for infile in &files {
         let mut input = std::fs::File::open(infile)?;
         std::io::copy(&mut input, &mut out)?;
-        println!(
+        crate::cli_info!(
             "\tCopied {} to {}",
             infile.file_name().unwrap().to_string_lossy(),
             first_name
@@ -92,7 +92,7 @@ pub fn run(
     let samples = read_bare_section(&text, section);
 
     for sample in &samples {
-        println!("Sample {sample}");
+        crate::cli_info!("Sample {sample}");
         merge_read(input, output, sample, "R1")?;
         if !single_end {
             merge_read(input, output, sample, "R2")?;

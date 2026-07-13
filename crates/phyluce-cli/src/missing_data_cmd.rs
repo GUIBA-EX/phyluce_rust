@@ -141,9 +141,9 @@ pub fn run(
         let out_path = output_dir.join(format!("{locus}.nexus"));
         std::fs::write(out_path, format_nexus(&Alignment { rows }))?;
     }
-    println!();
+    crate::cli_info!();
     for name in &dropped {
-        println!("Dropped {name} because of too few taxa (N < {min_taxa})");
+        crate::cli_info!("Dropped {name} because of too few taxa (N < {min_taxa})");
     }
     Ok(())
 }

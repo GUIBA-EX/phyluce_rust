@@ -22,7 +22,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from common import find_python_repo
+REPO_ROOT = find_python_repo()
 
 
 def run_py(program, args):

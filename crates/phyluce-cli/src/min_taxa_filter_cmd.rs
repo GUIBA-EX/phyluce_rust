@@ -26,7 +26,7 @@ pub fn run(
         }
     }
 
-    println!(
+    crate::cli_info!(
         "Copied {copied} alignments of {} total containing >= {percent} proportion of taxa (n = {min_count})",
         files.len()
     );

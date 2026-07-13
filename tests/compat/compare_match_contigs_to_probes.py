@@ -27,7 +27,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from common import RUST_ROOT, find_fixture_repo
+REPO_ROOT = find_fixture_repo()
 FIXTURE_DIR = REPO_ROOT / "phyluce/tests/test-expected/probe-match"
 CONTIGS_DIR = REPO_ROOT / "phyluce/tests/test-expected/spades/contigs"
 PROBES = REPO_ROOT / "phyluce/tests/probes/uce-5k-probes.fasta"
@@ -67,7 +68,7 @@ def read_csv_numeric_rows(path: Path):
 
 def main():
     rust_bin = Path(
-        sys.argv[1] if len(sys.argv) > 1 else REPO_ROOT / "rust/target/debug/phyluce"
+        sys.argv[1] if len(sys.argv) > 1 else RUST_ROOT / "target/debug/phyluce"
     )
     if not rust_bin.is_file():
         print(f"Rust binary not found at {rust_bin}", file=sys.stderr)

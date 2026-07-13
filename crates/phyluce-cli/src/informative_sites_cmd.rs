@@ -45,9 +45,11 @@ pub fn load_alignment(path: &Path, input_format: &str) -> anyhow::Result<phyluce
         "nexus" => Ok(parse_nexus(&std::fs::read_to_string(path)?)?),
         "fasta" => {
             let records = read_fasta(path)?;
-            Ok(phyluce_align::Alignment::from_pairs(
+            let alignment = phyluce_align::Alignment::from_pairs(
                 records.into_iter().map(|r| (r.id, r.sequence)).collect(),
-            ))
+            );
+            alignment.validate()?;
+            Ok(alignment)
         }
         _ => anyhow::bail!(
             "alignment parsing for input format '{input_format}' is not supported by this command"
@@ -83,9 +85,9 @@ pub fn run(
         }
         std::fs::write(out_path, out)?;
     } else {
-        println!("locus\tlength\tinformative_sites\tdifferences\tcounted-bases");
+        crate::cli_info!("locus\tlength\tinformative_sites\tdifferences\tcounted-bases");
         for (name, length, informative, differences, counted) in &rows {
-            println!("{name}\t{length}\t{informative}\t{differences}\t{counted}");
+            crate::cli_info!("{name}\t{length}\t{informative}\t{differences}\t{counted}");
         }
     }
     Ok(())

@@ -48,7 +48,7 @@ pub fn run(
         // mirrors the Python original: output keeps the *original*
         // basename (including its input extension), regardless of
         // `--output-format`.
-        let out_path = output_dir.join(name);
+        let out_path = crate::output_path::output_file(output_dir, name)?;
         match output_format {
             "fasta" => {
                 let mut out = std::fs::File::create(out_path)?;
@@ -62,6 +62,6 @@ pub fn run(
         }
         print!(".");
     }
-    println!();
+    crate::cli_info!();
     Ok(())
 }

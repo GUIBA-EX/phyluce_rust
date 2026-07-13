@@ -88,6 +88,15 @@ fn insert_species_rows(conn: &Connection, g: &str, cleaned: &str) -> anyhow::Res
     Ok(())
 }
 
+fn store_species_rows(conn: &Connection, genome: &str, cleaned: &str) -> anyhow::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    create_species_lastz_table(&tx, genome)?;
+    insert_species_rows(&tx, genome, cleaned)?;
+    tx.execute("INSERT INTO species (name) VALUES (?1)", [genome])?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn align_and_store(
     conn: &Connection,
     lastz_bin: &str,
@@ -102,7 +111,8 @@ fn align_and_store(
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("probes");
-        let output = output_dir.join(format!("{probe_name}_v_{g}.lastz"));
+        let output =
+            crate::output_path::output_file(output_dir, &format!("{probe_name}_v_{g}.lastz"))?;
         crate::lastz_align::run_many_lastz(
             lastz_bin,
             &target.to_string_lossy(),
@@ -117,9 +127,7 @@ fn align_and_store(
         std::fs::write(&clean_path, &cleaned)?;
         std::fs::remove_file(&output)?;
 
-        create_species_lastz_table(conn, g)?;
-        insert_species_rows(conn, g, &cleaned)?;
-        conn.execute("INSERT INTO species (name) VALUES (?1)", [g])?;
+        store_species_rows(conn, g, &cleaned)?;
     }
     Ok(())
 }
@@ -185,5 +193,28 @@ mod tests {
             genome_path("/genomes", true, "gallus"),
             PathBuf::from("/genomes/gallus.2bit")
         );
+    }
+
+    #[test]
+    fn species_import_rolls_back_on_a_malformed_row() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE species (name TEXT PRIMARY KEY)", [])
+            .unwrap();
+        let valid = vec!["1"; 19].join("\t");
+        let input = format!("{valid}\nmalformed\n");
+        assert!(store_species_rows(&conn, "taxon_a", &input).is_err());
+
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='taxon_a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let species_count: i64 = conn
+            .query_row("SELECT count(*) FROM species", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(table_count, 0);
+        assert_eq!(species_count, 0);
     }
 }

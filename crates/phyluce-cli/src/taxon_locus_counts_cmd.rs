@@ -24,7 +24,7 @@ pub fn run(alignments_dir: &Path, input_format: &str, output: &Path) -> anyhow::
         }
     }
 
-    println!("Writing taxon count data to {}", output.display());
+    crate::cli_info!("Writing taxon count data to {}", output.display());
     let mut out = std::fs::File::create(output)?;
     use std::io::Write as _;
     writeln!(out, "taxon,count")?;

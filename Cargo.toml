@@ -15,7 +15,7 @@ version = "0.1.0"
 edition = "2021"
 license = "BSD-3-Clause"
 authors = ["phyluce contributors"]
-repository = "https://github.com/faircloth-lab/phyluce"
+repository = "https://github.com/GUIBA-EX/phyluce_rust"
 
 [workspace.dependencies]
 anyhow = "1"

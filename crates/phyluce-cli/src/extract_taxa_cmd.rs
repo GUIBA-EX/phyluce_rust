@@ -77,6 +77,6 @@ pub fn run(
         }
         print!(".");
     }
-    println!();
+    crate::cli_info!();
     Ok(())
 }

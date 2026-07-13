@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use phyluce_align::trim::trim_alignment_running;
+use phyluce_align::trim::{trim_alignment_running, validate_trim_parameters};
 use phyluce_align::{nexus::format_nexus, Alignment};
 use phyluce_io::read_fasta;
 
@@ -19,6 +19,7 @@ pub fn run(
     max_divergence: f64,
     min_length: usize,
 ) -> anyhow::Result<()> {
+    validate_trim_parameters(window, proportion, threshold, max_divergence)?;
     std::fs::create_dir_all(output_dir)?;
 
     let mut files: Vec<PathBuf> = Vec::new();
@@ -60,9 +61,9 @@ pub fn run(
         use std::io::Write as _;
         std::io::stdout().flush().ok();
     }
-    println!();
+    crate::cli_info!();
     if dropped > 0 {
-        println!("Dropped {dropped} alignment(s)");
+        crate::cli_info!("Dropped {dropped} alignment(s)");
     }
     Ok(())
 }

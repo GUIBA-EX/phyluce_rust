@@ -23,6 +23,20 @@ pub struct Alignment {
     pub rows: Vec<AlignmentRow>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum AlignmentError {
+    #[error("alignment contains an empty taxon identifier")]
+    EmptyIdentifier,
+    #[error("alignment contains duplicate taxon {0:?}")]
+    DuplicateTaxon(String),
+    #[error("taxon {taxon:?} has {actual} characters; expected {expected}")]
+    UnequalLength {
+        taxon: String,
+        expected: usize,
+        actual: usize,
+    },
+}
+
 impl Alignment {
     pub fn from_pairs(pairs: Vec<(String, String)>) -> Self {
         Alignment {
@@ -42,5 +56,51 @@ impl Alignment {
 
     pub fn nchar(&self) -> usize {
         self.rows.first().map(|r| r.seq.len()).unwrap_or(0)
+    }
+
+    pub fn validate(&self) -> Result<(), AlignmentError> {
+        let expected = self.nchar();
+        let mut taxa = std::collections::HashSet::new();
+        for row in &self.rows {
+            if row.id.is_empty() {
+                return Err(AlignmentError::EmptyIdentifier);
+            }
+            if !taxa.insert(row.id.as_str()) {
+                return Err(AlignmentError::DuplicateTaxon(row.id.clone()));
+            }
+            if row.seq.len() != expected {
+                return Err(AlignmentError::UnequalLength {
+                    taxon: row.id.clone(),
+                    expected,
+                    actual: row.seq.len(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod alignment_tests {
+    use super::*;
+
+    #[test]
+    fn validates_row_lengths_and_unique_taxa() {
+        let unequal = Alignment::from_pairs(vec![
+            ("a".to_string(), "AAAA".to_string()),
+            ("b".to_string(), "AAA".to_string()),
+        ]);
+        assert!(matches!(
+            unequal.validate(),
+            Err(AlignmentError::UnequalLength { .. })
+        ));
+        let duplicate = Alignment::from_pairs(vec![
+            ("a".to_string(), "AAAA".to_string()),
+            ("a".to_string(), "AAAA".to_string()),
+        ]);
+        assert!(matches!(
+            duplicate.validate(),
+            Err(AlignmentError::DuplicateTaxon(_))
+        ));
     }
 }

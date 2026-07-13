@@ -45,6 +45,11 @@ pub(crate) fn open_maybe_gz(path: &Path) -> io::Result<Box<dyn BufRead>> {
 /// exact; use `.sequence.len()` for length-only use cases.
 pub fn read_fasta(path: &Path) -> Result<Vec<FastaRecord>, FastaError> {
     let reader = open_maybe_gz(path)?;
+    read_fasta_reader(reader)
+}
+
+/// Parse FASTA records from an existing buffered reader.
+pub fn read_fasta_reader(reader: impl BufRead) -> Result<Vec<FastaRecord>, FastaError> {
     let mut records = Vec::new();
     let mut current: Option<(String, String, String)> = None;
 

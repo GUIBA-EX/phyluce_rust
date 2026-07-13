@@ -68,10 +68,10 @@ pub fn run(
         }
         print!(".");
     }
-    println!();
+    crate::cli_info!();
     let mut taxa_list: Vec<&String> = all_taxa.iter().collect();
     taxa_list.sort();
-    println!(
+    crate::cli_info!(
         "Taxon names in alignments: {}",
         taxa_list
             .iter()
