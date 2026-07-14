@@ -28,7 +28,7 @@ pub fn run(
     min_length: usize,
 ) -> anyhow::Result<()> {
     validate_trim_parameters(window, proportion, threshold, max_divergence)?;
-    std::fs::create_dir_all(output)?;
+    crate::output_path::prepare_output_dir(output)?;
 
     if ambiguous {
         crate::cli_info!("NOT removing sequences with ambiguous bases...");

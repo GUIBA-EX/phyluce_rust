@@ -20,7 +20,11 @@ pub fn run(
     input_format: &str,
     output_format: &str,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    anyhow::ensure!(
+        matches!(output_format, "fasta" | "nexus"),
+        "output format '{output_format}' is not supported (only fasta/nexus)"
+    );
+    crate::output_path::prepare_output_dir(output_dir)?;
 
     let cfg = PhyluceConfig::load()?;
     let trimal_bin = cfg.get_user_path("binaries", "trimal")?;
@@ -66,11 +70,7 @@ pub fn run(
             records.into_iter().map(|r| (r.id, r.sequence)).collect(),
         );
 
-        let ext = if output_format == "fasta" {
-            "fasta"
-        } else {
-            "nexus"
-        };
+        let ext = output_format;
         let out_path = output_dir.join(format!("{name}.{ext}"));
         if output_format == "fasta" {
             let mut out = std::fs::File::create(out_path)?;

@@ -19,7 +19,7 @@ pub fn run(
         as_nexus != as_phylip,
         "exactly one of --nexus or --phylip is required"
     );
-    std::fs::create_dir_all(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)?;
 
     let mut files = find_alignment_files(alignments_dir, input_format)?;
     files.sort();

@@ -8,7 +8,11 @@ use phyluce_align::nexus::{format_nexus, parse_nexus};
 use phyluce_io::write_fasta_record;
 
 pub fn run(nexus_path: &Path, output_dir: &Path, output_format: &str) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    anyhow::ensure!(
+        matches!(output_format, "fasta" | "nexus"),
+        "output format '{output_format}' is not supported (only fasta/nexus)"
+    );
+    crate::output_path::prepare_output_dir(output_dir)?;
 
     let text = std::fs::read_to_string(nexus_path)?;
     let mut charsets = parse_charsets(&text);
@@ -30,11 +34,7 @@ pub fn run(nexus_path: &Path, output_dir: &Path, output_format: &str) -> anyhow:
                 .collect(),
         };
         let stem = c.name.replace(".nexus", "");
-        let ext = if output_format == "fasta" {
-            "fasta"
-        } else {
-            "nexus"
-        };
+        let ext = output_format;
         let out_path = output_dir.join(format!("{stem}.{ext}"));
         if output_format == "fasta" {
             let mut out = std::fs::File::create(out_path)?;

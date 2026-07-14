@@ -12,6 +12,8 @@ pub enum NexusError {
     NoMatrixBlock,
     #[error("empty taxon label on a matrix line: {0:?}")]
     EmptyLabel(String),
+    #[error("unterminated NEXUS comment")]
+    UnterminatedComment,
     #[error("{0}")]
     InvalidAlignment(#[from] crate::AlignmentError),
 }
@@ -86,21 +88,36 @@ pub fn format_nexus_with_interleave(alignment: &Alignment, interleave: bool) -> 
 /// labels), reconstructing each taxon's full sequence by concatenating its
 /// chunks across blocks in the order first encountered.
 pub fn parse_nexus(text: &str) -> Result<Alignment, NexusError> {
-    let lower = text.to_lowercase();
-    let matrix_pos = lower.find("matrix").ok_or(NexusError::NoMatrixBlock)?;
-    let after_matrix = &text[matrix_pos + "matrix".len()..];
+    let cleaned = strip_comments(text)?;
+    let mut lines = cleaned.lines();
+    let mut first_matrix_line = None;
+    for line in lines.by_ref() {
+        let trimmed = line.trim_start();
+        if trimmed
+            .get(..6)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("matrix"))
+        {
+            let rest = trimmed.get(6..).unwrap_or_default();
+            if rest.is_empty() || rest.starts_with(char::is_whitespace) {
+                first_matrix_line = Some(rest.trim_start().to_string());
+                break;
+            }
+        }
+    }
+    let first_matrix_line = first_matrix_line.ok_or(NexusError::NoMatrixBlock)?;
 
     let mut order: Vec<String> = Vec::new();
     let mut seqs: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
-    for raw_line in after_matrix.lines() {
+    for raw_line in std::iter::once(first_matrix_line.as_str()).chain(lines) {
         let line = raw_line.trim_end();
-        let trimmed = line.trim();
+        let (matrix_text, terminated) = split_matrix_terminator(line);
+        let trimmed = matrix_text.trim();
         if trimmed.is_empty() {
+            if terminated {
+                break;
+            }
             continue;
-        }
-        if trimmed == ";" {
-            break;
         }
 
         let (label, rest) = if let Some(stripped) = trimmed.strip_prefix('\'') {
@@ -139,7 +156,11 @@ pub fn parse_nexus(text: &str) -> Result<Alignment, NexusError> {
         if !seqs.contains_key(&label) {
             order.push(label.clone());
         }
-        seqs.entry(label).or_default().push_str(rest);
+        let sequence: String = rest.chars().filter(|c| !c.is_whitespace()).collect();
+        seqs.entry(label).or_default().push_str(&sequence);
+        if terminated {
+            break;
+        }
     }
 
     let alignment = Alignment {
@@ -153,6 +174,65 @@ pub fn parse_nexus(text: &str) -> Result<Alignment, NexusError> {
     };
     alignment.validate()?;
     Ok(alignment)
+}
+
+fn strip_comments(text: &str) -> Result<String, NexusError> {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut comment_depth = 0usize;
+    let mut quoted = false;
+
+    while let Some(c) = chars.next() {
+        if comment_depth > 0 {
+            match c {
+                '[' => comment_depth += 1,
+                ']' => comment_depth -= 1,
+                '\n' => out.push('\n'),
+                _ => {}
+            }
+            continue;
+        }
+        if c == '\'' {
+            out.push(c);
+            if quoted && chars.peek() == Some(&'\'') {
+                out.push(chars.next().unwrap_or('\''));
+            } else {
+                quoted = !quoted;
+            }
+        } else if c == '[' && !quoted {
+            if out
+                .chars()
+                .next_back()
+                .is_some_and(|last| !last.is_whitespace())
+            {
+                out.push(' ');
+            }
+            comment_depth = 1;
+        } else {
+            out.push(c);
+        }
+    }
+    if comment_depth != 0 {
+        return Err(NexusError::UnterminatedComment);
+    }
+    Ok(out)
+}
+
+fn split_matrix_terminator(line: &str) -> (&str, bool) {
+    let mut quoted = false;
+    let mut chars = line.char_indices().peekable();
+    while let Some((index, c)) = chars.next() {
+        if c == '\'' {
+            if quoted && chars.peek().is_some_and(|(_, next)| *next == '\'') {
+                chars.next();
+            } else {
+                quoted = !quoted;
+            }
+        } else if c == ';' && !quoted {
+            return (&line[..index], true);
+        }
+    }
+    (line, false)
 }
 
 #[cfg(test)]
@@ -195,6 +275,30 @@ mod tests {
         let text = format_nexus(&a);
         let parsed = parse_nexus(&text).unwrap();
         assert_eq!(parsed, a);
+    }
+
+    #[test]
+    fn ignores_comments_before_and_inside_the_matrix() {
+        let text = "#NEXUS\n[generated matrix comment]\nbegin data;\ndimensions ntax=2 nchar=4;\nformat datatype=dna missing=? gap=-;\nmatrix\ntax1 ACGT [row comment]\ntax2 ACGA\n;\nend;\n";
+        let parsed = parse_nexus(text).unwrap();
+        assert_eq!(parsed.rows[0].seq, b"ACGT");
+        assert_eq!(parsed.rows[1].seq, b"ACGA");
+    }
+
+    #[test]
+    fn accepts_a_matrix_terminator_after_the_final_sequence() {
+        let text = "#NEXUS\nbegin data;\ndimensions ntax=2 nchar=4;\nformat datatype=dna missing=? gap=-;\nmatrix\ntax1 ACGT\ntax2 ACGA;\nend;\n";
+        let parsed = parse_nexus(text).unwrap();
+        assert_eq!(parsed.rows[1].seq, b"ACGA");
+    }
+
+    #[test]
+    fn parses_grouped_sequences_and_embedded_comments() {
+        let text =
+            "#NEXUS\nbegin data;\nmatrix\ntax1 AC[ignored]GT AC GT\ntax2 ACGA AC GA;\nend;\n";
+        let parsed = parse_nexus(text).unwrap();
+        assert_eq!(parsed.rows[0].seq, b"ACGTACGT");
+        assert_eq!(parsed.rows[1].seq, b"ACGAACGA");
     }
 
     #[test]

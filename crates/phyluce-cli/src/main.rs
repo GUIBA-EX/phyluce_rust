@@ -450,11 +450,11 @@ enum ProbeAction {
         probe_regex: String,
         #[arg(long, num_args = 0.., value_delimiter = ' ')]
         exclude: Vec<String>,
-        #[arg(long, default_value_t = false)]
+        #[arg(long, alias = "contig_orient", default_value_t = false)]
         contig_orient: bool,
-        #[arg(long)]
+        #[arg(long, required_unless_present = "probes", conflicts_with = "probes")]
         flank: Option<i64>,
-        #[arg(long)]
+        #[arg(long, required_unless_present = "flank", conflicts_with = "flank")]
         probes: Option<i64>,
     },
     /// Equivalent to `phyluce_probe_easy_lastz`. Untested: `lastz` isn't
@@ -468,9 +468,9 @@ enum ProbeAction {
         output: PathBuf,
         #[arg(long, default_value_t = 92.5)]
         identity: f64,
-        #[arg(long, default_value_t = 83.0)]
+        #[arg(long, default_value_t = 83.0, conflicts_with = "min_match")]
         coverage: f64,
-        #[arg(long)]
+        #[arg(long, alias = "min_match", conflicts_with = "coverage")]
         min_match: Option<i64>,
     },
     /// Equivalent to `phyluce_probe_run_multiple_lastzs_sqlite`. Untested
@@ -555,11 +555,11 @@ enum GenetreesAction {
     GenerateMultilocusBootstrapCount {
         #[arg(long)]
         alignments: PathBuf,
-        #[arg(long)]
+        #[arg(long, alias = "bootstrap_replicates")]
         bootstrap_replicates: PathBuf,
         #[arg(long, default_value = "")]
         directory: String,
-        #[arg(long)]
+        #[arg(long, alias = "bootstrap_counts")]
         bootstrap_counts: PathBuf,
         #[arg(long, default_value_t = 100)]
         bootreps: usize,
@@ -568,7 +568,7 @@ enum GenetreesAction {
     SortMultilocusBootstraps {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
+        #[arg(long, alias = "bootstrap_replicates")]
         bootstrap_replicates: PathBuf,
         #[arg(long)]
         output: PathBuf,
@@ -955,7 +955,7 @@ enum AlignAction {
         proportion: f64,
         #[arg(long, default_value_t = 0.65)]
         threshold: f64,
-        #[arg(long, default_value_t = 0.20)]
+        #[arg(long, alias = "max_divergence", default_value_t = 0.20)]
         max_divergence: f64,
         #[arg(long, default_value_t = 100)]
         min_length: usize,
@@ -996,8 +996,8 @@ enum AlignAction {
         #[arg(long, default_value = "nexus")]
         input_format: String,
     },
-    /// Equivalent to `phyluce_align_get_align_summary_data`'s
-    /// `--output-stats` CSV (the log-only summary lines aren't reproduced).
+    /// Equivalent to `phyluce_align_get_align_summary_data`: print aggregate
+    /// statistics and optionally write the per-alignment CSV.
     GetAlignSummaryData {
         #[arg(long)]
         alignments: PathBuf,
@@ -1005,6 +1005,11 @@ enum AlignAction {
         input_format: String,
         #[arg(long)]
         output_stats: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        show_taxon_counts: bool,
+        /// Accepted for compatibility; processing is currently serial.
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_concatenate_alignments`.
     ConcatenateAlignments {
@@ -2152,7 +2157,15 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             alignments,
             input_format,
             output_stats,
-        } => align_summary_cmd::run(&alignments, &input_format, output_stats),
+            show_taxon_counts,
+            cores,
+        } => align_summary_cmd::run(
+            &alignments,
+            &input_format,
+            output_stats,
+            show_taxon_counts,
+            cores,
+        ),
         AlignAction::ConcatenateAlignments {
             alignments,
             input_format,
@@ -2935,5 +2948,60 @@ mod cli_compat_tests {
                 }
             }
         ));
+    }
+
+    #[test]
+    fn accepts_legacy_underscore_option_names() {
+        Cli::try_parse_from([
+            "phyluce",
+            "align",
+            "get-trimmed-alignments-from-untrimmed",
+            "--alignments",
+            "in",
+            "--output",
+            "out",
+            "--max_divergence",
+            "0.1",
+        ])
+        .unwrap();
+
+        Cli::try_parse_from([
+            "phyluce",
+            "probe",
+            "easy-lastz",
+            "--target",
+            "target.fasta",
+            "--query",
+            "query.fasta",
+            "--output",
+            "out.lastz",
+            "--min_match",
+            "100",
+        ])
+        .unwrap();
+    }
+
+    #[test]
+    fn slice_requires_exactly_one_flank_mode() {
+        let base = [
+            "phyluce",
+            "probe",
+            "slice-sequence-from-genomes",
+            "--conf",
+            "conf.ini",
+            "--lastz",
+            "matches",
+            "--output",
+            "out",
+        ];
+        assert!(Cli::try_parse_from(base).is_err());
+
+        let mut both = base.to_vec();
+        both.extend_from_slice(&["--flank", "500", "--probes", "probes.fasta"]);
+        assert!(Cli::try_parse_from(both).is_err());
+
+        let mut flank = base.to_vec();
+        flank.extend_from_slice(&["--flank", "500", "--contig_orient"]);
+        Cli::try_parse_from(flank).unwrap();
     }
 }

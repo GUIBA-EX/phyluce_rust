@@ -56,7 +56,8 @@ phyluce align convert-degen-bases
   `stockholm` 静默当作 FASTA 处理。
 - 新增 `phyluce-io::sql`，集中处理 SQL 标识符转义，并替换相关动态表名、
   列名拼接。
-- 新增覆盖 74 个原版可执行脚本的旧命令名兼容层。
+- 新增覆盖 74 个原版可执行脚本名的命令映射；部分旧选项和中间文件格式
+  仍存在下列差异。
 - 新增基于 `tracing` 的可选文件日志：全局参数 `--log-path` 和
   `--verbosity`。默认不写日志，不改变 stdout/stderr。
 - 扩展兼容性测试，优先使用已有 fixture，随机、外部工具或历史兼容问题路径
@@ -74,6 +75,10 @@ phyluce align convert-degen-bases
 - `merge-multiple-gzip-files --trimmed`、`rename-tree-leaves --reroot`、部分
   alignment 输出格式尚未移植。对应选项会明确报错，不能作为
   原版脚本的无条件替换。
+- `get-match-counts` 尚未移植 `--optimize` 随机优化路径。
+- bootstrap replicate 使用纯文本格式，不兼容原版 Python `pickle` 中间文件；
+  同一流程中不要混用两种实现。
+- 部分 genetree 命令当前仅接受 Newick 输入，原版支持的其他树文件结构需先转换。
 
 ## 开发检查
 

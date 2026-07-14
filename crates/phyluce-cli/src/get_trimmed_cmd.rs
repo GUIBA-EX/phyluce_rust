@@ -20,7 +20,7 @@ pub fn run(
     min_length: usize,
 ) -> anyhow::Result<()> {
     validate_trim_parameters(window, proportion, threshold, max_divergence)?;
-    std::fs::create_dir_all(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)?;
 
     let mut files: Vec<PathBuf> = Vec::new();
     for entry in std::fs::read_dir(alignments_dir)? {

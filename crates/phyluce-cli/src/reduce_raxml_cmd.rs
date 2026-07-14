@@ -11,7 +11,7 @@ use phyluce_external::ExternalCommand;
 use crate::informative_sites_cmd::find_alignment_files;
 
 pub fn run(alignments_dir: &Path, output_dir: &Path, input_format: &str) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)?;
     let cfg = PhyluceConfig::load()?;
     let raxml_bin = cfg.get_user_path("binaries", "raxmlHPC-SSE3")?;
 

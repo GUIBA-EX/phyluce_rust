@@ -155,7 +155,7 @@ phyluce_align_convert_degen_bases.log
 
 ## 5. 原版脚本名兼容
 
-Rust 二进制支持全部 74 个原版可执行脚本名：如果把 `phyluce` 复制或软链接为旧脚本名，它会自动映射到新的分组命令。
+Rust 二进制可识别全部 74 个原版可执行脚本名：如果把 `phyluce` 复制或软链接为旧脚本名，它会自动映射到新的分组命令。脚本名可映射不代表所有旧选项和中间文件格式完全等价，具体边界见“已知差异”。
 
 例如：
 
@@ -518,7 +518,8 @@ phyluce align convert-one-align-to-another \
   --output-format nexus
 ```
 
-当前重点支持 FASTA/NEXUS 兼容路径。其他格式请先用小数据验证。
+输入支持 FASTA、NEXUS、PHYLIP（含 relaxed/sequential）、CLUSTAL、EMBOSS
+和 Stockholm；该转换命令当前仅输出 FASTA 或 NEXUS，不支持的格式会明确报错。
 
 ### 7.6 转换 IUPAC degenerate bases
 
@@ -1205,7 +1206,8 @@ phyluce external check --program binaries --binary mafft
 | `assembly match-contigs-to-barcodes` | 不执行 BOLD 网络查询；本地 LASTZ slicing 请使用 `--no-bold` |
 | `assembly match-contigs-to-probes` | 新增 `--skip-alignment` 和 `--force`，用于 CI 和非交互运行 |
 | `align seqcap-align` | 当前使用 MAFFT；原版支持 MAFFT/MUSCLE 选择 |
-| `align convert-one-align-to-another` | 当前主要覆盖 FASTA/NEXUS 兼容路径 |
+| alignment 输入 | 支持 FASTA、NEXUS、PHYLIP（含 relaxed/sequential）、CLUSTAL、EMBOSS 和 Stockholm；各命令的输出格式仍以帮助信息和明确报错为准 |
+| `align get-align-summary-data` | 接受 `--cores` 以兼容旧脚本，但当前串行统计 |
 | `align randomly-sample-and-concatenate` | 使用 seeded PRNG 思路，避免原版随机行为不可复现 |
 | `align get-smilogram-from-alignments` | major-allele tie 使用确定性规则 |
 | `probe get-screened-loci-by-proximity` | cluster tie 保留最小 locus id，而非随机选择 |
@@ -1213,6 +1215,8 @@ phyluce external check --program binaries --binary mafft
 | `probe reconstruct-uce-from-probe` | 默认使用 MAFFT；可通过 `--muscle-binary` 显式使用原版 MUSCLE 3/Clustal 路径 |
 | `probe run-multiple-lastzs-sqlite` | `--cores` 已接受但未按原版 chunked multiprocessing 并行化 |
 | `genetrees generate-multilocus-bootstrap-count` | 使用纯文本 replicate 格式，不使用 Python pickle |
+| `assembly get-match-counts` | 尚未移植原版 `--optimize` 随机优化路径 |
+| `genetrees rename-tree-leaves` | 尚未实现 `--reroot`；部分 genetree 命令仅接受 Newick 输入 |
 | `ncbi prep-uce-align-files-for-ncbi` | Rust 版按预期行为实现，不复现现代 Biopython 下原版导入失败 |
 
 ## 15. 故障排查

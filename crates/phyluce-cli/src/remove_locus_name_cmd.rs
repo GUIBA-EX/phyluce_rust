@@ -31,7 +31,7 @@ pub fn run(
         output_format == "fasta" || output_format == "nexus",
         "output format '{output_format}' is not yet supported (only fasta/nexus)"
     );
-    std::fs::create_dir_all(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)?;
     let files = find_alignment_files(alignments_dir, input_format)?;
 
     print!("Running");

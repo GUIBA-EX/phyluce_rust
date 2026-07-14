@@ -42,7 +42,7 @@ pub fn run(
     input_format: &str,
     binary: bool,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)?;
     let files = find_alignment_files(alignments_dir, input_format)?;
     let translate = if binary {
         binary_translate

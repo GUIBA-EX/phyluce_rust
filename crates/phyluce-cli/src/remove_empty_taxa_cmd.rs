@@ -15,7 +15,11 @@ pub fn run(
     input_format: &str,
     output_format: &str,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    anyhow::ensure!(
+        matches!(output_format, "fasta" | "nexus"),
+        "output format '{output_format}' is not supported (only fasta/nexus)"
+    );
+    crate::output_path::prepare_output_dir(output_dir)?;
     let files = find_alignment_files(alignments_dir, input_format)?;
 
     for file in &files {
@@ -34,10 +38,7 @@ pub fn run(
             .collect();
         let new_alignment = Alignment { rows };
 
-        let ext = match output_format {
-            "fasta" => "fasta",
-            _ => "nexus",
-        };
+        let ext = output_format;
         let out_path = output_dir.join(format!("{stem}.{ext}"));
         match output_format {
             "fasta" => {
@@ -46,9 +47,10 @@ pub fn run(
                     write_fasta_record(&mut out, &row.id, std::str::from_utf8(&row.seq)?)?;
                 }
             }
-            _ => {
+            "nexus" => {
                 std::fs::write(out_path, format_nexus(&new_alignment))?;
             }
+            _ => unreachable!("output format was validated above"),
         }
         print!(".");
     }

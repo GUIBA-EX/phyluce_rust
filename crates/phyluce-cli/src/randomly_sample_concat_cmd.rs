@@ -51,7 +51,7 @@ pub fn run(
     sample_size: usize,
     replicates: usize,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)?;
     let mut files: Vec<PathBuf> = std::fs::read_dir(alignments_dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())

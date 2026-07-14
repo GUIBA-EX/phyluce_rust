@@ -62,7 +62,7 @@ pub fn run(
     input_format: &str,
     check_missing: bool,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)?;
 
     let config = read_section_list_config(match_count_output)?;
     let organisms: Vec<String> = config

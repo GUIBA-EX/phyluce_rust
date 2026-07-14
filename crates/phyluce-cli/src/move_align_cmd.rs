@@ -16,7 +16,7 @@ pub fn run(
     opposite: bool,
     extension: &str,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)?;
     let conf_text = std::fs::read_to_string(conf)?;
     let parsed = crate::conf::parse_ini(&conf_text);
 

@@ -27,7 +27,7 @@ pub fn run(
     by_taxon: bool,
     include_locus: bool,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)?;
     let files = find_alignment_files(alignments_dir, input_format)?;
 
     let mut names: HashMap<String, String> = HashMap::new();
