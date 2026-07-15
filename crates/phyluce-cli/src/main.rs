@@ -702,9 +702,8 @@ enum AssemblyAction {
         #[arg(long, default_value_t = false)]
         force: bool,
     },
-    /// Equivalent to `phyluce_assembly_get_match_counts` (non-`--optimize`
-    /// path): generate a complete- or incomplete-matrix taxon/loci config
-    /// from `probe.matches.sqlite`.
+    /// Equivalent to `phyluce_assembly_get_match_counts`: generate a matrix
+    /// config or optimize complete-matrix taxon membership.
     GetMatchCounts {
         #[arg(long)]
         locus_db: PathBuf,
@@ -716,6 +715,33 @@ enum AssemblyAction {
         output: PathBuf,
         #[arg(long, default_value_t = false)]
         incomplete_matrix: bool,
+        /// Find the taxon subset with the most shared UCE loci. Without
+        /// `--random`, enumerate every group size and write a report.
+        #[arg(long, default_value_t = false)]
+        optimize: bool,
+        /// Estimate the best `--sample-size` taxon subset by repeated
+        /// sampling instead of exhaustive enumeration.
+        #[arg(long, default_value_t = false, requires = "optimize")]
+        random: bool,
+        /// Number of random optimization iterations.
+        #[arg(long, default_value_t = 10)]
+        samples: usize,
+        /// Number of taxa retained by each random optimization iteration.
+        #[arg(long, default_value_t = 10)]
+        sample_size: usize,
+        /// Suppress writing taxa and locus names for normal/random modes.
+        #[arg(long, default_value_t = false)]
+        silent: bool,
+        /// Write `sample_size,locus_count` for every random iteration instead
+        /// of the best matrix config.
+        #[arg(long, default_value_t = false, requires = "random")]
+        keep_counts: bool,
+        /// Reproducible random seed. A generated seed is reported when omitted.
+        #[arg(long, requires = "random")]
+        seed: Option<u64>,
+        /// Maximum concurrent group-size searches during exhaustive optimization.
+        #[arg(long, default_value_t = 6)]
+        cores: usize,
         /// An additional SQLite database of probe matches, ATTACHed as
         /// `extended` (referenced via a trailing `*` on organism names).
         #[arg(long)]
@@ -2590,6 +2616,14 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
             taxon_group,
             output,
             incomplete_matrix,
+            optimize,
+            random,
+            samples,
+            sample_size,
+            silent,
+            keep_counts,
+            seed,
+            cores,
             extend_locus_db,
         } => match_counts_cmd::run(
             &locus_db,
@@ -2598,6 +2632,16 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
             &output,
             incomplete_matrix,
             extend_locus_db,
+            match_counts_cmd::OptimizationOptions {
+                optimize,
+                random,
+                samples,
+                sample_size,
+                silent,
+                keep_counts,
+                seed,
+                cores,
+            },
         ),
         AssemblyAction::GetFastasFromMatchCounts {
             contigs,

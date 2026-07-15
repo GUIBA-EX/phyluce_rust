@@ -76,6 +76,8 @@ phyluce align convert-degen-bases
   命令支持由 `--cores` 控制的确定性文件级并行。
 - `run-multiple-lastzs-sqlite` 使用有界全局任务队列流式处理所有 genome 的
   染色体和约 10 Mbp scaffold 分块；完成的 genome 会立即合并并逐行写入 SQLite。
+- `get-match-counts` 支持完整枚举和随机 taxon-group 优化；随机模式可记录种子，
+  完整枚举可通过 `--cores` 并行不同组大小。
 - concatenation 使用两遍解析和磁盘暂存矩阵，避免同时保留全部 locus 与完整
   拼接矩阵；FASTA/NEXUS 解析复用缓冲区并减少中间复制。
 - 扩展兼容性测试，优先使用已有 fixture，随机、外部工具或历史兼容问题路径
@@ -93,7 +95,6 @@ phyluce align convert-degen-bases
 - `merge-multiple-gzip-files --trimmed`、`rename-tree-leaves --reroot`、部分
   alignment 输出格式尚未移植。对应选项会明确报错，不能作为
   原版脚本的无条件替换。
-- `get-match-counts` 尚未移植 `--optimize` 随机优化路径。
 - bootstrap replicate 使用纯文本格式，不兼容原版 Python `pickle` 中间文件；
   同一流程中不要混用两种实现。
 - 部分 genetree 命令当前仅接受 Newick 输入，原版支持的其他树文件结构需先转换。

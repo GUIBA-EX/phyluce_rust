@@ -1,13 +1,8 @@
 //! Contig-count / matrix-membership pipeline mirroring
-//! `phyluce_assembly_get_match_counts`'s non-`--optimize` path (complete and
-//! incomplete matrix generation from `probe.matches.sqlite`).
-//!
-//! `--optimize`/`--random` (combinatorial best-subgroup search) isn't
-//! implemented yet -- it's a rarely used, heavy (multiprocessing) feature
-//! with no golden fixture; see docs/rust-rewrite-plan.md's phased command
-//! priority list.
+//! `phyluce_assembly_get_match_counts`, including complete/incomplete matrix
+//! generation and complete-matrix taxon-group optimization.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use phyluce_io::sql::{ident, qualified_ident};
@@ -21,6 +16,33 @@ pub enum MatchCountError {
     Sqlite(#[from] rusqlite::Error),
     #[error("no [{0}] section in taxon-list-config")]
     NoSuchGroup(String),
+    #[error("optimization group size must be between 1 and {taxa}, got {size}")]
+    InvalidOptimizationGroupSize { size: usize, taxa: usize },
+    #[error("--samples must be greater than zero")]
+    InvalidSampleCount,
+    #[error(
+        "--sample-size must be between 1 and one less than the number of taxa ({taxa}), got {size}"
+    )]
+    InvalidSampleSize { size: usize, taxa: usize },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OptimizedGroup {
+    pub organisms: Vec<String>,
+    pub uces: HashSet<String>,
+}
+
+impl OptimizedGroup {
+    pub fn locus_count(&self) -> usize {
+        self.uces.len()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SampleOptimization {
+    pub best: OptimizedGroup,
+    pub counts: Vec<(usize, usize)>,
+    pub missing_counts: BTreeMap<String, usize>,
 }
 
 /// A `[section]`-per-line conf file, `allow_no_value=True`-style: each
@@ -189,6 +211,195 @@ pub fn incomplete_matrix(
     all.intersection(uces).cloned().collect()
 }
 
+fn intersect_matches(
+    shared: &HashSet<String>,
+    matches: Option<&HashSet<String>>,
+) -> HashSet<String> {
+    let Some(matches) = matches else {
+        return HashSet::new();
+    };
+    if shared.len() <= matches.len() {
+        shared
+            .iter()
+            .filter(|uce| matches.contains(*uce))
+            .cloned()
+            .collect()
+    } else {
+        matches
+            .iter()
+            .filter(|uce| shared.contains(*uce))
+            .cloned()
+            .collect()
+    }
+}
+
+fn search_combinations(
+    organismal_matches: &HashMap<String, HashSet<String>>,
+    organisms: &[String],
+    start: usize,
+    remaining: usize,
+    chosen: &mut Vec<usize>,
+    shared: &HashSet<String>,
+    best: &mut Option<OptimizedGroup>,
+) {
+    if best
+        .as_ref()
+        .is_some_and(|current| shared.len() <= current.locus_count())
+    {
+        return;
+    }
+    if remaining == 0 {
+        *best = Some(OptimizedGroup {
+            organisms: chosen
+                .iter()
+                .map(|&index| organisms[index].clone())
+                .collect(),
+            uces: shared.clone(),
+        });
+        return;
+    }
+
+    let last_start = organisms.len() - remaining;
+    for index in start..=last_start {
+        let next_shared = intersect_matches(shared, organismal_matches.get(&organisms[index]));
+        chosen.push(index);
+        search_combinations(
+            organismal_matches,
+            organisms,
+            index + 1,
+            remaining - 1,
+            chosen,
+            &next_shared,
+            best,
+        );
+        chosen.pop();
+    }
+}
+
+/// Return the first taxon combination of `size` with the largest complete
+/// matrix. Strict `>` replacement preserves the legacy first-combination tie
+/// rule.
+pub fn optimize_group_for_size(
+    organismal_matches: &HashMap<String, HashSet<String>>,
+    organisms: &[String],
+    uces: &HashSet<String>,
+    size: usize,
+) -> Result<OptimizedGroup, MatchCountError> {
+    if size == 0 || size > organisms.len() {
+        return Err(MatchCountError::InvalidOptimizationGroupSize {
+            size,
+            taxa: organisms.len(),
+        });
+    }
+    let mut best = None;
+    search_combinations(
+        organismal_matches,
+        organisms,
+        0,
+        size,
+        &mut Vec::with_capacity(size),
+        uces,
+        &mut best,
+    );
+    Ok(best.expect("a valid group size always has at least one combination"))
+}
+
+struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E3779B97F4A7C15);
+        let mut value = self.state;
+        value = (value ^ (value >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94D049BB133111EB);
+        value ^ (value >> 31)
+    }
+
+    fn index(&mut self, upper: usize) -> usize {
+        debug_assert!(upper > 0);
+        let upper = upper as u64;
+        let threshold = upper.wrapping_neg() % upper;
+        loop {
+            let value = self.next_u64();
+            if value >= threshold {
+                return (value % upper) as usize;
+            }
+        }
+    }
+}
+
+fn sample_without_replacement(
+    organisms: &[String],
+    count: usize,
+    rng: &mut SplitMix64,
+) -> Vec<String> {
+    let mut pool = organisms.to_vec();
+    for index in 0..count {
+        let selected = index + rng.index(pool.len() - index);
+        pool.swap(index, selected);
+    }
+    pool.truncate(count);
+    pool
+}
+
+/// Mirror the legacy sampling objective: draw `sample_size + 1` taxa, then
+/// retain the `sample_size`-taxon subset with the largest complete matrix.
+pub fn sample_optimized_groups(
+    organismal_matches: &HashMap<String, HashSet<String>>,
+    organisms: &[String],
+    uces: &HashSet<String>,
+    samples: usize,
+    sample_size: usize,
+    seed: u64,
+) -> Result<SampleOptimization, MatchCountError> {
+    if samples == 0 {
+        return Err(MatchCountError::InvalidSampleCount);
+    }
+    if sample_size == 0 || sample_size >= organisms.len() {
+        return Err(MatchCountError::InvalidSampleSize {
+            size: sample_size,
+            taxa: organisms.len(),
+        });
+    }
+
+    let mut rng = SplitMix64::new(seed);
+    let mut best: Option<OptimizedGroup> = None;
+    let mut counts = Vec::with_capacity(samples);
+    let mut missing_counts = BTreeMap::new();
+
+    for _ in 0..samples {
+        let sampled = sample_without_replacement(organisms, sample_size + 1, &mut rng);
+        let group = optimize_group_for_size(organismal_matches, &sampled, uces, sample_size)?;
+        counts.push((sample_size, group.locus_count()));
+
+        let selected: HashSet<&str> = group.organisms.iter().map(String::as_str).collect();
+        for organism in organisms {
+            if !selected.contains(organism.as_str()) {
+                *missing_counts.entry(organism.clone()).or_insert(0) += 1;
+            }
+        }
+
+        if best
+            .as_ref()
+            .is_none_or(|current| group.locus_count() > current.locus_count())
+        {
+            best = Some(group);
+        }
+    }
+
+    Ok(SampleOptimization {
+        best: best.expect("positive sample count always produces a group"),
+        counts,
+        missing_counts,
+    })
+}
+
 /// Format the `[Organisms]` / `[Loci]` output config, both lists sorted.
 /// Mirrors the `main()` output-writing block's `"\n".join(sorted(...))`.
 pub fn format_output(organisms: &[String], uces: &HashSet<String>) -> String {
@@ -274,6 +485,78 @@ mod tests {
             result,
             HashSet::from(["uce-1".to_string(), "uce-2".to_string()])
         );
+    }
+
+    fn optimization_fixture() -> (
+        HashMap<String, HashSet<String>>,
+        Vec<String>,
+        HashSet<String>,
+    ) {
+        let organisms = ["a", "b", "c", "d"].map(str::to_string).to_vec();
+        let organismal = HashMap::from([
+            (
+                "a".to_string(),
+                ["uce-1", "uce-2", "uce-3", "uce-4"]
+                    .map(str::to_string)
+                    .into_iter()
+                    .collect(),
+            ),
+            (
+                "b".to_string(),
+                ["uce-1", "uce-2", "uce-3"]
+                    .map(str::to_string)
+                    .into_iter()
+                    .collect(),
+            ),
+            (
+                "c".to_string(),
+                ["uce-1", "uce-2", "uce-4"]
+                    .map(str::to_string)
+                    .into_iter()
+                    .collect(),
+            ),
+            (
+                "d".to_string(),
+                ["uce-1", "uce-4"].map(str::to_string).into_iter().collect(),
+            ),
+        ]);
+        let uces = ["uce-1", "uce-2", "uce-3", "uce-4"]
+            .map(str::to_string)
+            .into_iter()
+            .collect();
+        (organismal, organisms, uces)
+    }
+
+    #[test]
+    fn optimization_preserves_first_combination_on_ties() {
+        let (organismal, organisms, uces) = optimization_fixture();
+        let best = optimize_group_for_size(&organismal, &organisms, &uces, 2).unwrap();
+        assert_eq!(best.organisms, vec!["a", "b"]);
+        assert_eq!(best.locus_count(), 3);
+
+        let best = optimize_group_for_size(&organismal, &organisms, &uces, 3).unwrap();
+        assert_eq!(best.organisms, vec!["a", "b", "c"]);
+        assert_eq!(best.locus_count(), 2);
+    }
+
+    #[test]
+    fn sampled_optimization_is_reproducible_and_counts_missing_taxa() {
+        let (organismal, organisms, uces) = optimization_fixture();
+        let first = sample_optimized_groups(&organismal, &organisms, &uces, 20, 2, 42).unwrap();
+        let second = sample_optimized_groups(&organismal, &organisms, &uces, 20, 2, 42).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.counts.len(), 20);
+        assert_eq!(first.best.organisms.len(), 2);
+        assert_eq!(first.missing_counts.values().sum::<usize>(), 40);
+    }
+
+    #[test]
+    fn sampled_optimization_rejects_invalid_ranges() {
+        let (organismal, organisms, uces) = optimization_fixture();
+        assert!(sample_optimized_groups(&organismal, &organisms, &uces, 0, 2, 1).is_err());
+        assert!(sample_optimized_groups(&organismal, &organisms, &uces, 1, 0, 1).is_err());
+        assert!(sample_optimized_groups(&organismal, &organisms, &uces, 1, 4, 1).is_err());
+        assert!(optimize_group_for_size(&organismal, &organisms, &uces, 0).is_err());
     }
 
     #[test]

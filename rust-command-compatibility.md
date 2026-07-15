@@ -45,6 +45,10 @@ phyluce_workflow
   `--muscle-binary` explicitly selects the legacy MUSCLE 3/Clustal path.
 - Some Python 2 or Python 3-incompatible original scripts are matched to their
   intended behavior rather than their runtime failure mode.
+- `get-match-counts --optimize` implements the intended exhaustive and random
+  search behavior. Exhaustive rows are also written to the required output
+  path, `--keep-counts` writes its CSV correctly, and Rust adds `--seed` for
+  reproducible sampling.
 - `merge-multiple-gzip-files --trimmed`, `rename-tree-leaves --reroot`, and
   several legacy alignment output formats are not implemented.
   These options fail explicitly rather than silently changing behavior.

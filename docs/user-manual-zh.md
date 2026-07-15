@@ -446,6 +446,47 @@ phyluce assembly get-match-counts \
 incomplete matrix 允许部分 taxa 缺失。先生成 incomplete 集合通常更便于评估
 不同占比阈值会保留多少 loci，再根据研究设计选择最终矩阵。
 
+优化 complete matrix 的 taxon 组成时，可以使用完整枚举：
+
+```bash
+phyluce assembly get-match-counts \
+  --locus-db uce-search/probe.matches.sqlite \
+  --taxon-list-config taxon-set.conf \
+  --taxon-group all \
+  --output taxon-group-optimization.tsv \
+  --optimize \
+  --cores 6
+```
+
+该模式为 1 到全部 taxa 的每个组大小寻找共享 UCE 数最多的组合，并将
+`逗号分隔的 taxa<TAB>UCE 数`写入报告。它需要检查全部非空组合，复杂度近似
+`2^n - 1`，只适合较小的 taxon 集。
+
+较大的 taxon 集应使用随机抽样：
+
+```bash
+phyluce assembly get-match-counts \
+  --locus-db uce-search/probe.matches.sqlite \
+  --taxon-list-config taxon-set.conf \
+  --taxon-group all \
+  --output taxon-set.optimized.conf \
+  --optimize \
+  --random \
+  --samples 1000 \
+  --sample-size 20 \
+  --seed 42
+```
+
+每次迭代随机选择 `sample-size + 1` 个 taxa，再从中找出共享 UCE 数最多的
+`sample-size` 个 taxa。最终输出最佳组合的 `[Organisms]`/`[Loci]` 配置。省略
+`--seed` 时程序会生成并报告种子；正式分析应保存它。`--keep-counts` 会改为输出
+每次迭代的 `sample_size,locus_count`，`--silent` 则不写出最佳 taxa/loci 配置。
+
+优化目标始终是 complete matrix，因此 `--optimize` 不能与
+`--incomplete-matrix` 同时使用；`--sample-size` 必须大于 0 且小于组内 taxa
+总数。随机搜索是启发式方法，增加 `--samples` 可以扩大搜索范围，但不保证得到
+全局最优组合。
+
 ### 6.5 从 contigs 提取 UCE FASTA
 
 complete matrix：
@@ -1371,7 +1412,6 @@ phyluce external check --program binaries --binary mafft
 | `probe get-tiled-probes` / `get-tiled-probe-from-multiple-inputs` | `--two-probes` tie 处理为确定性 |
 | `probe reconstruct-uce-from-probe` | 默认使用 MAFFT；可通过 `--muscle-binary` 显式使用原版 MUSCLE 3/Clustal 路径 |
 | `genetrees generate-multilocus-bootstrap-count` | 使用纯文本 replicate 格式，不使用 Python pickle |
-| `assembly get-match-counts` | 尚未移植原版 `--optimize` 随机优化路径 |
 | `genetrees rename-tree-leaves` | 尚未实现 `--reroot`；部分 genetree 命令仅接受 Newick 输入 |
 | `ncbi prep-uce-align-files-for-ncbi` | Rust 版按预期行为实现，不复现现代 Biopython 下原版导入失败 |
 

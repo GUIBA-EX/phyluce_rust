@@ -10,6 +10,7 @@ script, since the fixtures were generated against a specific
 `probe.matches.sqlite` snapshot rather than anything this harness
 regenerates on the fly.
 """
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,46 @@ def run_rust(rust_bin: Path, output: Path, incomplete: bool):
     return proc.returncode, proc.stdout + proc.stderr
 
 
+def run_random_optimize(rust_bin: Path, database: Path, config: Path, output: Path):
+    cmd = [
+        str(rust_bin), "assembly", "get-match-counts",
+        "--locus-db", str(database),
+        "--taxon-list-config", str(config),
+        "--taxon-group", "all",
+        "--output", str(output),
+        "--optimize", "--random",
+        "--samples", "3",
+        "--sample-size", "2",
+        "--seed", "7",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def write_optimize_fixture(root: Path):
+    database = root / "optimize.sqlite"
+    config = root / "optimize.conf"
+    with sqlite3.connect(database) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE matches (uce TEXT PRIMARY KEY, a INTEGER, b INTEGER, c INTEGER);
+            CREATE TABLE match_map (uce TEXT PRIMARY KEY, a TEXT, b TEXT, c TEXT);
+            INSERT INTO matches VALUES
+                ('uce-1', 1, 1, 1),
+                ('uce-2', 1, 1, 0),
+                ('uce-3', 1, 1, 0),
+                ('uce-4', 1, 0, 1);
+            INSERT INTO match_map VALUES
+                ('uce-1', 'a1(+)', 'b1(+)', 'c1(+)'),
+                ('uce-2', 'a2(+)', 'b2(+)', ''),
+                ('uce-3', 'a3(+)', 'b3(+)', ''),
+                ('uce-4', 'a4(+)', '', 'c4(+)');
+            """
+        )
+    config.write_text("[all]\na\nb\nc\n")
+    return database, config
+
+
 def main():
     rust_bin = Path(
         sys.argv[1] if len(sys.argv) > 1 else RUST_ROOT / "target/debug/phyluce"
@@ -47,6 +88,7 @@ def main():
 
     failed = 0
     with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
         for incomplete, expected in (
             (False, EXPECTED_COMPLETE),
             (True, EXPECTED_INCOMPLETE),
@@ -65,10 +107,23 @@ def main():
                 print(f"  expected: {expected_text!r}")
                 print(f"  actual:   {actual!r}")
 
+        database, config = write_optimize_fixture(temp_root)
+        optimized = temp_root / "optimized.conf"
+        code, log = run_random_optimize(rust_bin, database, config, optimized)
+        expected_optimized = "[Organisms]\na\nb\n[Loci]\nuce-1\nuce-2\nuce-3\n"
+        if code != 0:
+            failed += 1
+            print(f"random optimization failed:\n{log}")
+        elif optimized.read_text() != expected_optimized:
+            failed += 1
+            print("random optimization output differs")
+            print(f"  expected: {expected_optimized!r}")
+            print(f"  actual:   {optimized.read_text()!r}")
+
     if failed:
         print(f"{failed} mismatch(es).")
         return 1
-    print("get-match-counts: complete + incomplete matrix outputs match fixtures exactly.")
+    print("get-match-counts: complete, incomplete, and random optimization outputs pass.")
     return 0
 
 
