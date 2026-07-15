@@ -2,6 +2,8 @@
 //! field-for-field: quoting rule, name-column padding, and the
 //! `interleave` switch/block width.
 
+use std::borrow::Cow;
+
 use crate::{Alignment, AlignmentRow};
 
 #[derive(Debug, thiserror::Error)]
@@ -99,7 +101,7 @@ pub fn parse_nexus(text: &str) -> Result<Alignment, NexusError> {
         {
             let rest = trimmed.get(6..).unwrap_or_default();
             if rest.is_empty() || rest.starts_with(char::is_whitespace) {
-                first_matrix_line = Some(rest.trim_start().to_string());
+                first_matrix_line = Some(rest.trim_start());
                 break;
             }
         }
@@ -109,7 +111,7 @@ pub fn parse_nexus(text: &str) -> Result<Alignment, NexusError> {
     let mut order: Vec<String> = Vec::new();
     let mut seqs: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
-    for raw_line in std::iter::once(first_matrix_line.as_str()).chain(lines) {
+    for raw_line in std::iter::once(first_matrix_line).chain(lines) {
         let line = raw_line.trim_end();
         let (matrix_text, terminated) = split_matrix_terminator(line);
         let trimmed = matrix_text.trim();
@@ -153,11 +155,11 @@ pub fn parse_nexus(text: &str) -> Result<Alignment, NexusError> {
         if label.is_empty() {
             return Err(NexusError::EmptyLabel(line.to_string()));
         }
-        if !seqs.contains_key(&label) {
-            order.push(label.clone());
-        }
-        let sequence: String = rest.chars().filter(|c| !c.is_whitespace()).collect();
-        seqs.entry(label).or_default().push_str(&sequence);
+        let sequence = seqs.entry(label.clone()).or_insert_with(|| {
+            order.push(label);
+            String::new()
+        });
+        sequence.extend(rest.chars().filter(|c| !c.is_whitespace()));
         if terminated {
             break;
         }
@@ -176,7 +178,10 @@ pub fn parse_nexus(text: &str) -> Result<Alignment, NexusError> {
     Ok(alignment)
 }
 
-fn strip_comments(text: &str) -> Result<String, NexusError> {
+fn strip_comments(text: &str) -> Result<Cow<'_, str>, NexusError> {
+    if !text.contains('[') {
+        return Ok(Cow::Borrowed(text));
+    }
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     let mut comment_depth = 0usize;
@@ -215,7 +220,7 @@ fn strip_comments(text: &str) -> Result<String, NexusError> {
     if comment_depth != 0 {
         return Err(NexusError::UnterminatedComment);
     }
-    Ok(out)
+    Ok(Cow::Owned(out))
 }
 
 fn split_matrix_terminator(line: &str) -> (&str, bool) {
@@ -283,6 +288,12 @@ mod tests {
         let parsed = parse_nexus(text).unwrap();
         assert_eq!(parsed.rows[0].seq, b"ACGT");
         assert_eq!(parsed.rows[1].seq, b"ACGA");
+    }
+
+    #[test]
+    fn comment_free_input_is_not_copied() {
+        let text = "#NEXUS\nbegin data;\nmatrix\ntax1 ACGT;\nend;\n";
+        assert!(matches!(strip_comments(text).unwrap(), Cow::Borrowed(_)));
     }
 
     #[test]

@@ -17,12 +17,14 @@ pub fn run(
     containing: &[String],
     min_length: usize,
     min_taxa: usize,
+    cores: usize,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     crate::output_path::prepare_output_dir(output_dir)?;
     let files = find_alignment_files(alignments_dir, input_format)?;
 
-    for file in &files {
-        let alignment = load_alignment(file, input_format)?;
+    let good = crate::parallel::try_map_ordered(files, cores, |file| {
+        let alignment = load_alignment(&file, input_format)?;
 
         let contains_ok = if containing.is_empty() {
             true
@@ -50,9 +52,14 @@ pub fn run(
 
         if contains_ok && length_ok && taxa_ok {
             let name = file.file_name().unwrap();
-            std::fs::copy(file, output_dir.join(name))?;
-            crate::cli_info!("Good alignment: {}", name.to_string_lossy());
+            std::fs::copy(&file, output_dir.join(name))?;
+            Ok(Some(name.to_string_lossy().into_owned()))
+        } else {
+            Ok(None)
         }
+    })?;
+    for name in good.into_iter().flatten() {
+        crate::cli_info!("Good alignment: {name}");
     }
     Ok(())
 }

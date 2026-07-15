@@ -4,6 +4,37 @@
 
 当前 Rust CLI 处于早期预览阶段。多数命令已经按原版脚本行为实现，但仍有少数命令依赖外部程序，或与原版存在有意的兼容差异。正式分析前，建议先用小数据或现有 fixture 运行一遍完整流程。
 
+## 0. 阅读指南与适用范围
+
+本手册只描述 `phyluce` Rust CLI。原版 PHYLUCE 的
+[官方文档](https://phyluce.readthedocs.io/en/latest/index.html)适合了解 UCE
+方法背景和经典工作流，但其中的 Python/Conda 安装命令不能直接用于本项目。
+Rust 版本的实际参数以 `phyluce --help` 和各级子命令帮助为准。
+
+Rust CLI 主要覆盖以下环节：
+
+- 调用外部 assembler，并整理各样本 contigs。
+- 将 contigs 与 UCE probes 匹配，过滤重复或疑似旁系同源命中。
+- 生成完整或不完整 locus 集合并提取序列。
+- 使用 MAFFT 比对，随后修剪、过滤、统计和拼接 alignment。
+- 处理 probe/genome、gene-tree、NCBI 提交和常用格式转换任务。
+
+以下工作不属于本 CLI 的完整职责：
+
+- 原始 reads 的接头去除、低质量碱基清理和实验批次质量评估。
+- MAFFT、LASTZ、SPAdes、Gblocks、trimAl、RAxML、Snakemake 等外部程序
+  本身的安装和算法参数选择。
+- 使用 IQ-TREE、RAxML、ASTRAL 等完成最终系统发育推断。
+
+推荐阅读路线：
+
+| 目标 | 阅读章节 |
+| --- | --- |
+| 首次安装并跑通流程 | 2 -> 3 -> 4 -> 6 -> 7 -> 17 |
+| 从原版 `phyluce_*` 脚本迁移 | 1 -> 5 -> 14 -> 16 |
+| 复现实验或报告错误 | 4 -> 15 -> 18 -> 19 -> 20 |
+| 只查询某个命令 | 6-13，并同时查看对应的 `--help` |
+
 ## 1. 命令形式
 
 Rust 版本提供一个统一入口：
@@ -49,6 +80,17 @@ phyluce assembly match-contigs-to-probes --help
 
 ## 2. 构建与安装
 
+### 2.1 环境要求
+
+- 支持 Rust 2021 edition 的稳定版 Rust 工具链和 Cargo。
+- 推荐 Linux 或 macOS 等类 Unix 环境。实际可移植性还取决于所调用的外部程序。
+- 足够保存 reads、contigs、逐 locus alignment、LASTZ 中间结果和最终矩阵的
+  磁盘空间。大型 LASTZ 与拼接任务还需要可用的临时目录空间。
+- 只安装当前分析会调用的外部程序。Conda 可用于管理这些程序，但不是 Rust
+  CLI 的安装方式。
+
+### 2.2 构建
+
 在仓库根目录运行：
 
 ```bash
@@ -80,6 +122,33 @@ cargo check -p phyluce-cli
 cargo test -p phyluce-io -p phyluce-assembly -p phyluce-cli
 cargo clippy -p phyluce-cli --all-targets -- -D warnings
 ```
+
+### 2.3 推荐项目目录
+
+每个分析阶段使用独立输出目录，便于回溯、重跑和比较参数：
+
+```text
+project/
+  raw-fastq/                 # 原始数据，只读保存
+  clean-fastq/               # 接头和质量清理后的 reads
+  assembly/
+    contigs/
+  probes/
+    uce-probes.fasta
+  uce-search/                # LASTZ 与 probe.matches.sqlite
+  taxon-sets/                # taxon 配置和 complete/incomplete locus 列表
+  alignments/
+    untrimmed/
+    trimmed/
+    filtered/
+  matrices/                  # NEXUS/PHYLIP 与 charsets
+  stats/
+  logs/
+```
+
+不要把输出写回输入目录，也不要在确认新结果前覆盖旧阶段。分析开始时记录
+`phyluce --version`、外部程序版本和实际使用的配置文件；第 19 节给出完整的
+复现清单。
 
 ## 3. 配置外部程序
 
@@ -190,6 +259,7 @@ phyluce_workflow
 
 ```text
 raw reads
+  -> adapter/quality cleaning（外部工具）
   -> assembly
   -> contigs/*.contigs.fasta
   -> contigs 与 probes 做 LASTZ 匹配
@@ -199,6 +269,15 @@ raw reads
   -> 按 locus 比对
   -> trimming / filtering / concatenation / summary
 ```
+
+进入流程前先确认：
+
+1. reads 已完成接头去除和质量清理，并保留相应质控报告。
+2. 样本名在 reads 目录、assembly 配置和 taxon 配置中完全一致；建议只使用
+   字母、数字和下划线。
+3. 双端 reads 的配对命名、singleton 处理和压缩格式符合所选 assembler 的要求。
+4. probes 的 header 可由默认正则提取 locus；否则提前确定 `--regex`。
+5. 用 `get-fastq-lengths` 抽查 reads 数量，用小型样本检查外部程序和日志路径。
 
 ### 6.1 组装 reads
 
@@ -311,6 +390,12 @@ uce-search/
   probe_match_results.csv
 ```
 
+匹配摘要不仅用于统计 UCE 回收量，也用于发现潜在旁系同源和重复命中。一个
+locus 命中同一样本的多个 contig，或一个 contig 对应多个 locus 时，不应直接
+当作多个独立 UCE 使用。应检查 `--dupefile`、重复命中输出和样本间回收量差异；
+异常偏高可能来自重复序列或阈值过宽，异常偏低则可能反映数据质量、组装质量、
+探针距离或命名问题。
+
 ### 6.4 生成 complete 或 incomplete matrix 的 locus 列表
 
 配置文件示例：
@@ -356,6 +441,10 @@ phyluce assembly get-match-counts \
 [Loci]
 ...
 ```
+
+这里的 complete matrix 要求所选 loci 在配置中的全部 taxa 都有匹配；
+incomplete matrix 允许部分 taxa 缺失。先生成 incomplete 集合通常更便于评估
+不同占比阈值会保留多少 loci，再根据研究设计选择最终矩阵。
 
 ### 6.5 从 contigs 提取 UCE FASTA
 
@@ -406,7 +495,28 @@ phyluce assembly explode-get-fastas-file \
   --by-taxon
 ```
 
+### 6.7 阶段性质量检查
+
+不要只以“命令成功退出”判断流程有效。每一步至少检查以下结果：
+
+| 阶段 | 建议检查 | 常见异常信号 |
+| --- | --- | --- |
+| reads 与组装 | reads 数量、contig 数量和长度分布 | 某样本显著少于同批样本；大量极短 contig |
+| probe 匹配 | 每个样本回收 loci 数、重复 locus/contig 数 | 单个样本回收量异常；重复命中过多 |
+| match-count | taxa 名单、保留 loci 数、缺失分布 | 配置中的 taxon 未进入结果；阈值变化不合理 |
+| FASTA 提取 | 序列条数、方向、header 和 missing 报告 | 空序列、异常短序列、header 无法拆分 |
+| 比对与修剪 | 每个 locus 的 taxa 数、长度和模糊字符 | 修剪后大量 locus 消失或只剩很短片段 |
+| 最终矩阵 | taxa 数、loci 数、总字符数和 charset 范围 | 拼接长度与 charset 末端不一致；样本全为缺失 |
+
+建议把匹配摘要、alignment summary、taxon-locus counts 和最终 charset 与命令
+日志一起归档。它们是定位数据损失发生在哪一阶段的最小证据链。
+
 ## 7. Alignment 工作流
+
+MAFFT 是当前默认且推荐的比对程序。`seqcap-align` 可在比对后直接执行 edge
+trimming；如需比较未修剪与已修剪结果，可对同一输入分别运行一次 `--no-trim`
+和一次带修剪参数的命令。Gblocks/trimAl 可进一步处理内部不可靠区域，但更严格
+的设置也可能删除具有系统发育信息的位点，因此阈值应结合数据和下游模型选择。
 
 ### 7.1 按 locus 比对 monolithic FASTA
 
@@ -439,12 +549,15 @@ phyluce align seqcap-align \
   --proportion 0.65 \
   --threshold 0.65 \
   --max-divergence 0.20 \
-  --min-length 100
+  --min-length 100 \
+  --cores 8
 ```
 
 注意：当前实现使用 MAFFT；`--aligner muscle` 尚未实现为 CLI 参数。
+`seqcap-align` 无论是否启用修剪都写出 NEXUS。下一节的命令专用于已有的 FASTA
+alignment 目录，不能直接读取这里生成的 NEXUS；如需这样串联，应先转换为 FASTA。
 
-### 7.2 修剪已有 alignments
+### 7.2 修剪已有 FASTA alignments
 
 phyluce 原生三阶段 edge trimming：
 
@@ -456,7 +569,8 @@ phyluce align get-trimmed-alignments-from-untrimmed \
   --proportion 0.65 \
   --threshold 0.65 \
   --max-divergence 0.20 \
-  --min-length 100
+  --min-length 100 \
+  --cores 8
 ```
 
 Gblocks：
@@ -466,7 +580,8 @@ phyluce align get-gblocks-trimmed-alignments-from-untrimmed \
   --alignments mafft-alignments \
   --output mafft-gblocks \
   --input-format fasta \
-  --output-format nexus
+  --output-format nexus \
+  --cores 8
 ```
 
 trimAl：
@@ -476,10 +591,14 @@ phyluce align get-trimal-trimmed-alignments-from-untrimmed \
   --alignments mafft-alignments \
   --output mafft-trimal \
   --input-format fasta \
-  --output-format nexus
+  --output-format nexus \
+  --cores 8
 ```
 
-Gblocks 和 trimAl 仍依赖外部程序。
+这些命令按 `--cores` 并行处理独立 locus；Gblocks 和 trimAl 仍依赖外部程序。
+
+修剪后运行 `get-align-summary-data`，对比输入与输出的 locus 数、平均长度和
+taxa 数。如果大量 locus 被删除或长度骤降，应先复核参数，不要直接进入拼接。
 
 ### 7.3 添加缺失数据占位符
 
@@ -505,7 +624,8 @@ phyluce align remove-empty-taxa \
   --alignments mafft-with-missing \
   --output mafft-no-empty \
   --input-format nexus \
-  --output-format nexus
+  --output-format nexus \
+  --cores 8
 ```
 
 ### 7.5 alignment 格式转换
@@ -515,7 +635,8 @@ phyluce align convert-one-align-to-another \
   --alignments mafft-alignments \
   --output mafft-nexus \
   --input-format fasta \
-  --output-format nexus
+  --output-format nexus \
+  --cores 8
 ```
 
 输入支持 FASTA、NEXUS、PHYLIP（含 relaxed/sequential）、CLUSTAL、EMBOSS
@@ -528,7 +649,8 @@ phyluce align convert-degen-bases \
   --alignments mafft-degen-bases \
   --output mafft-degen-bases-converted \
   --input-format fasta \
-  --output-format nexus
+  --output-format nexus \
+  --cores 8
 ```
 
 该命令将 degenerate IUPAC 碱基转换为 `N`。
@@ -576,7 +698,8 @@ phyluce align filter-alignments \
   --input-format nexus \
   --containing-data-for gallus_gallus \
   --min-length 600 \
-  --min-taxa 3
+  --min-taxa 3 \
+  --cores 8
 ```
 
 按最小 taxon 占比保留 loci：
@@ -587,16 +710,36 @@ phyluce align get-only-loci-with-min-taxa \
   --taxa 4 \
   --percent 0.75 \
   --output mafft-gblocks-clean-75p \
-  --input-format nexus
+  --input-format nexus \
+  --cores 8
 ```
 
-### 7.9 拼接 alignments
+`--percent 0.75` 表示每个保留 locus 至少包含 `--taxa` 所定义总 taxon 数的
+75%，不是“每个 taxon 至少出现在 75% 的 loci 中”。例如 `--taxa 20
+--percent 0.75` 要求每个 locus 至少有 15 个 taxa；它不能保证任一特定 taxon
+在最终矩阵中的覆盖率。后者应通过 `get-taxon-locus-counts-in-alignments` 单独检查。
+
+### 7.9 清理序列名并拼接 alignments
+
+从 UCE monolithic FASTA 生成的序列名可能包含 locus 后缀。下游分析通常只需要
+taxon 名，拼接前可先清理：
+
+```bash
+phyluce align remove-locus-name-from-files \
+  --alignments mafft-gblocks-clean \
+  --output cleaned-names \
+  --input-format nexus \
+  --output-format nexus \
+  --cores 8
+```
+
+先抽查输出 header，确认清理后没有产生重复 taxon 名，再进行拼接。
 
 输出 NEXUS：
 
 ```bash
 phyluce align concatenate-alignments \
-  --alignments mafft-gblocks-clean \
+  --alignments cleaned-names \
   --output concat-nexus \
   --nexus
 ```
@@ -605,10 +748,18 @@ phyluce align concatenate-alignments \
 
 ```bash
 phyluce align concatenate-alignments \
-  --alignments mafft-gblocks-clean \
+  --alignments cleaned-names \
   --output concat-phylip \
   --phylip
 ```
+
+拼接过程分两遍读取 locus，并使用自动清理的磁盘暂存矩阵；峰值内存主要由单个
+locus 决定，而不是全部输入和完整拼接矩阵之和。
+
+PHYLIP 输出同时生成 charset 信息，记录每个 locus 在拼接矩阵中的字符范围，可
+作为 IQ-TREE、RAxML 等分区配置的依据；是否需要转换格式取决于下游软件版本和
+参数。运行下游程序前，应确认所有 charset 区间连续、不重叠，最后一个区间终点
+等于拼接序列总长度。
 
 ### 7.10 拆分 concatenated NEXUS
 
@@ -627,8 +778,11 @@ alignment summary：
 phyluce align get-align-summary-data \
   --alignments mafft-gblocks-clean \
   --input-format nexus \
+  --cores 8 \
   --output-stats align-summary.csv
 ```
+
+alignment 文件按 `--cores` 并行解析和统计，最终输出仍按文件名排序。
 
 informative sites：
 
@@ -983,11 +1137,15 @@ phyluce probe run-multiple-lastzs-sqlite \
   --probefile probes.fasta \
   --genome-base-path /path/to/genomes \
   --chromolist alligator gallus \
+  --cores 8 \
   --coverage 83 \
   --identity 92.5
 ```
 
-注意：当前 Rust 版本接受 `--cores`，但该实现未按原版 multiprocessing/chunking 并行化。
+`--cores` 控制全局并发 LASTZ 进程数。所有 genome 共用一个有界任务队列：
+染色体 genome 按 `.2bit` 内的序列拆分，scaffold genome 边解码边生成约 10 Mbp
+临时 FASTA 分块。各分块可以乱序完成，但会按目标顺序合并；完成的 genome 会
+立即流式生成 `.clean` 文件并由主线程逐行写入 SQLite 事务。
 
 ## 9. Utilities 命令
 
@@ -1207,13 +1365,11 @@ phyluce external check --program binaries --binary mafft
 | `assembly match-contigs-to-probes` | 新增 `--skip-alignment` 和 `--force`，用于 CI 和非交互运行 |
 | `align seqcap-align` | 当前使用 MAFFT；原版支持 MAFFT/MUSCLE 选择 |
 | alignment 输入 | 支持 FASTA、NEXUS、PHYLIP（含 relaxed/sequential）、CLUSTAL、EMBOSS 和 Stockholm；各命令的输出格式仍以帮助信息和明确报错为准 |
-| `align get-align-summary-data` | 接受 `--cores` 以兼容旧脚本，但当前串行统计 |
 | `align randomly-sample-and-concatenate` | 使用 seeded PRNG 思路，避免原版随机行为不可复现 |
 | `align get-smilogram-from-alignments` | major-allele tie 使用确定性规则 |
 | `probe get-screened-loci-by-proximity` | cluster tie 保留最小 locus id，而非随机选择 |
 | `probe get-tiled-probes` / `get-tiled-probe-from-multiple-inputs` | `--two-probes` tie 处理为确定性 |
 | `probe reconstruct-uce-from-probe` | 默认使用 MAFFT；可通过 `--muscle-binary` 显式使用原版 MUSCLE 3/Clustal 路径 |
-| `probe run-multiple-lastzs-sqlite` | `--cores` 已接受但未按原版 chunked multiprocessing 并行化 |
 | `genetrees generate-multilocus-bootstrap-count` | 使用纯文本 replicate 格式，不使用 Python pickle |
 | `assembly get-match-counts` | 尚未移植原版 `--optimize` 随机优化路径 |
 | `genetrees rename-tree-leaves` | 尚未实现 `--reroot`；部分 genetree 命令仅接受 Newick 输入 |
@@ -1303,50 +1459,100 @@ PHYLUCE_PYTHON_REPO=/path/to/phyluce \
 完整动态对照会调用原版依赖以及 MAFFT、LASTZ、RAxML 等外部程序；缺少这些
 依赖时应使用 `run_fixtures.py`。
 
-## 17. 推荐最小示例
+## 17. 端到端最小示例
 
-以下命令展示一个最小 UCE 主流程：
+以下示例从已组装 contigs 开始，构建一个至少包含 75% taxa 的矩阵。假设
+`taxon-sets/taxon-set.conf` 的 `[all]` 中有 4 个 taxa；真实分析必须把 `--taxa 4`
+改为配置中的总数。每一步使用独立目录，并把日志保存在 `logs/`。
+
+先检查输入和外部程序：
 
 ```bash
-# 1. contigs vs probes
-phyluce assembly match-contigs-to-probes \
+mkdir -p logs stats taxon-sets alignments matrices
+phyluce --version
+phyluce config inspect
+phyluce external check --program binaries --binary lastz
+phyluce external check --program binaries --binary mafft
+phyluce io validate-fasta --input probes/uce-5k-probes.fasta
+```
+
+运行主流程：
+
+```bash
+# 1. contigs 与 probes 匹配
+phyluce --log-path logs/01-match assembly match-contigs-to-probes \
   --contigs assembly/contigs \
-  --probes uce-5k-probes.fasta \
+  --probes probes/uce-5k-probes.fasta \
   --output uce-search \
   --csv uce-search/probe_match_results.csv
 
-# 2. complete matrix loci
-phyluce assembly get-match-counts \
+# 2. 生成允许缺失的 locus 集合
+phyluce --log-path logs/02-counts assembly get-match-counts \
   --locus-db uce-search/probe.matches.sqlite \
-  --taxon-list-config taxon-set.conf \
+  --taxon-list-config taxon-sets/taxon-set.conf \
   --taxon-group all \
-  --output taxon-set.complete.conf
+  --incomplete-matrix \
+  --output taxon-sets/all.incomplete.conf
 
-# 3. extract monolithic FASTA
-phyluce assembly get-fastas-from-match-counts \
+# 3. 提取并重命名 UCE 序列
+phyluce --log-path logs/03-extract assembly get-fastas-from-match-counts \
   --contigs assembly/contigs \
   --locus-db uce-search/probe.matches.sqlite \
-  --match-count-output taxon-set.complete.conf \
-  --output taxon-set.complete.fasta
+  --match-count-output taxon-sets/all.incomplete.conf \
+  --incomplete-matrix taxon-sets/all.missing.conf \
+  --output taxon-sets/all.incomplete.fasta
 
-# 4. align by locus
-phyluce align seqcap-align \
-  --input taxon-set.complete.fasta \
-  --output mafft-no-trim \
+# 4. MAFFT 比对并直接执行 edge trimming；输出为 NEXUS
+phyluce --log-path logs/04-align align seqcap-align \
+  --input taxon-sets/all.incomplete.fasta \
+  --output alignments/trimmed \
   --taxa 4 \
-  --no-trim
+  --incomplete-matrix \
+  --cores 8
 
-# 5. trim existing alignments
-phyluce align get-trimmed-alignments-from-untrimmed \
-  --alignments mafft-no-trim \
-  --output mafft-edge-trim
+# 5. 汇总修剪结果
+phyluce --log-path logs/05-summary align get-align-summary-data \
+  --alignments alignments/trimmed \
+  --input-format nexus \
+  --cores 8 \
+  --output-stats stats/trimmed-alignments.csv
 
-# 6. concatenate
-phyluce align concatenate-alignments \
-  --alignments mafft-edge-trim \
-  --output concat-nexus \
-  --nexus
+# 6. 保留每个 locus 至少含 75% taxa 的 alignment
+phyluce --log-path logs/06-filter align get-only-loci-with-min-taxa \
+  --alignments alignments/trimmed \
+  --taxa 4 \
+  --percent 0.75 \
+  --output alignments/filtered-75p \
+  --input-format nexus \
+  --cores 8
+
+# 7. 检查每个 taxon 在多少 loci 中有数据
+phyluce align get-taxon-locus-counts-in-alignments \
+  --alignments alignments/filtered-75p \
+  --input-format nexus \
+  --output stats/taxon-locus-counts-75p.csv
+
+# 8. 移除序列名中的 locus 后缀
+phyluce --log-path logs/08-clean-names align remove-locus-name-from-files \
+  --alignments alignments/filtered-75p \
+  --output alignments/final-75p \
+  --input-format nexus \
+  --output-format nexus \
+  --cores 8
+
+# 9. 输出 PHYLIP 与 charset/partition 文件
+phyluce --log-path logs/09-concat align concatenate-alignments \
+  --alignments alignments/final-75p \
+  --output matrices/all-75p-phylip \
+  --phylip
 ```
+
+完成后至少核对：`probe_match_results.csv` 中各样本回收量没有异常离群值；
+`trimmed-alignments.csv` 中没有大批极短 loci；每个最终 alignment 满足 75%
+阈值；charset 的最后坐标等于拼接长度；关键 taxon 在
+`taxon-locus-counts-75p.csv` 中没有大面积缺失。需要 NEXUS 时，对同一个
+`alignments/final-75p` 再运行一次 `concatenate-alignments --nexus`，并使用不同
+输出目录。
 
 ## 18. 版本状态
 
@@ -1358,3 +1564,69 @@ phyluce config inspect
 ```
 
 并保存每一步命令的 `--log-path` 日志，以便复现。
+
+## 19. 可复现性与资源设置
+
+正式分析应保存以下信息：
+
+```bash
+phyluce --version
+phyluce config inspect
+git rev-parse HEAD               # 从源码构建时记录
+mafft --version
+lastz --version
+```
+
+同时归档：
+
+- 样本与 taxon 配置、probe FASTA 的版本或校验值。
+- 每一步完整命令、日志、输入和输出目录名称。
+- MAFFT、LASTZ、assembler、trimming 和系统发育软件的版本。
+- filtering、occupancy、identity、coverage 和 trimming 参数。
+- 最终 taxa/loci 数、alignment 统计、charset/partition 和缺失数据摘要。
+
+`--cores` 控制支持并行的命令，但最优值不一定等于机器全部逻辑核心。MAFFT、
+LASTZ、组装器和文件级并行可能同时消耗 CPU、内存与文件句柄；先用少量样本观察
+资源占用，再增加核心数。多 genome LASTZ 任务使用全局有界任务队列，拼接使用
+两遍读取和磁盘暂存，因此还应确保输入文件在运行期间不被修改，并为系统临时
+目录（通常由 `TMPDIR` 决定）保留足够空间。
+
+## 20. 引用、许可证与问题报告
+
+使用本项目进行研究时，应记录 Rust CLI 版本或提交号，并根据实际工作流引用
+原版 PHYLUCE 方法及所调用的外部软件。原版 PHYLUCE 建议引用：
+
+> Faircloth, B. C. 2016. PHYLUCE is a software package for the analysis of
+> conserved genomic loci. *Bioinformatics* 32:786-788.
+> https://doi.org/10.1093/bioinformatics/btv646
+
+探针设计、目标富集方法和特定生物类群可能还需要其他论文；以
+[原版引用说明](https://phyluce.readthedocs.io/en/latest/citing.html)为准。Rust
+重构本身当前没有单独的论文或 DOI，不应虚构引用信息。
+
+本项目采用 BSD 3-Clause License，完整条款见 [LICENSE](../LICENSE)。分发源码或
+二进制时应遵守其中的版权声明、条件和免责声明。
+
+报告问题时，请在当前仓库的
+[GitHub Issues](https://github.com/GUIBA-EX/phyluce_rust/issues)提供：
+
+1. `phyluce --version`、操作系统和 CPU 架构。
+2. 完整命令、最小可复现输入和使用的配置片段；删除敏感路径。
+3. 对应日志、实际结果、预期结果和退出状态。
+4. 涉及的外部程序及其版本。
+5. 问题是否可在单核心和小型 fixture 上复现。
+
+## 21. 参考资料
+
+- [PHYLUCE 官方文档](https://phyluce.readthedocs.io/en/latest/index.html)：原版项目
+  的整体入口和命令索引。
+- [Purpose](https://phyluce.readthedocs.io/en/latest/purpose.html)：UCE 工作流的
+  目标和适用范围。
+- [Installation](https://phyluce.readthedocs.io/en/latest/installation.html)：原版
+  Python 环境及外部依赖背景；不要直接作为 Rust 安装步骤使用。
+- [Tutorial I](https://phyluce.readthedocs.io/en/latest/tutorials/tutorial-1.html)：
+  从 reads、组装、UCE 提取到矩阵准备的经典流程。
+- [Citing](https://phyluce.readthedocs.io/en/latest/citing.html)：PHYLUCE 与 UCE
+  方法的引用建议。
+- [License](https://phyluce.readthedocs.io/en/latest/license.html)：原版软件和文档
+  的许可信息。本项目的实际许可仍以本仓库 `LICENSE` 为准。

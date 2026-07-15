@@ -26,7 +26,9 @@ pub fn run(
     threshold: f64,
     max_divergence: f64,
     min_length: usize,
+    cores: usize,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     validate_trim_parameters(window, proportion, threshold, max_divergence)?;
     crate::output_path::prepare_output_dir(output)?;
 
@@ -75,12 +77,10 @@ pub fn run(
     let cfg = PhyluceConfig::load()?;
     let mafft_bin = mafft_binary_path(&cfg)?;
 
-    let mut locus_names: Vec<String> = loci.keys().cloned().collect();
-    locus_names.sort();
-    let mut dropped = 0usize;
-    for locus in &locus_names {
-        let sequences = &loci[locus];
-        let raw = run_mafft(&mafft_bin, sequences)?;
+    let mut work: Vec<(String, Vec<(String, String)>)> = loci.into_iter().collect();
+    work.sort_by(|left, right| left.0.cmp(&right.0));
+    let results = crate::parallel::try_map_ordered(work, cores, |(locus, sequences)| {
+        let raw = run_mafft(&mafft_bin, &sequences)?;
         let aligned = if no_trim {
             Some(raw)
         } else {
@@ -95,18 +95,17 @@ pub fn run(
         };
         match aligned {
             Some(aln) => {
-                print!(".");
-                write_output(output, locus, &aln)?;
+                write_output(output, &locus, &aln)?;
+                Ok(false)
             }
-            None => {
-                print!("X");
-                dropped += 1;
-            }
+            None => Ok(true),
         }
-        use std::io::Write as _;
-        std::io::stdout().flush().ok();
+    })?;
+    for &dropped in &results {
+        print!("{}", if dropped { 'X' } else { '.' });
     }
     crate::cli_info!();
+    let dropped = results.iter().filter(|&&dropped| dropped).count();
     if dropped > 0 {
         crate::cli_info!("Dropped {dropped} alignment(s)");
     }

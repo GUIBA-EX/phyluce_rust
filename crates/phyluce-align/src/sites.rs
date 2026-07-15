@@ -1,73 +1,74 @@
 //! Informative-site / difference counting, mirroring `phyluce/sites.py`.
 
-use std::collections::HashMap;
-
 use crate::Alignment;
 
-/// Per-column character counts (uppercased), used by both site-counting
-/// functions below. Mirrors `Counter(align[:, idx].upper())`.
-fn column_counts(alignment: &Alignment, col: usize) -> HashMap<u8, usize> {
-    let mut counts = HashMap::new();
-    for row in &alignment.rows {
-        let c = row.seq[col].to_ascii_uppercase();
-        *counts.entry(c).or_insert(0) += 1;
-    }
-    counts
+pub(crate) struct SiteStatistics {
+    pub informative: usize,
+    pub differences: usize,
+    pub counted: usize,
+    pub characters: [usize; 256],
 }
 
-/// Mirrors `get_informative_sites`: after removing gap/N/? counts, a
-/// column is "informative" if at least 2 distinct remaining characters
-/// each occur at least twice.
-fn is_informative(mut counts: HashMap<u8, usize>) -> bool {
-    counts.remove(&b'-');
-    counts.remove(&b'N');
-    counts.remove(&b'?');
-    if counts.len() >= 2 {
-        let sufficient = counts.values().filter(|&&v| v >= 2).count();
-        if sufficient >= 2 {
-            return true;
+/// Count all site metrics and alignment characters in one column-major pass.
+/// A byte-indexed array avoids allocating and cloning a hash table per column.
+pub(crate) fn compute_site_statistics(alignment: &Alignment) -> SiteStatistics {
+    let mut statistics = SiteStatistics {
+        informative: 0,
+        differences: 0,
+        counted: 0,
+        characters: [0; 256],
+    };
+    let mut column = [0usize; 256];
+    let mut observed = [0u8; 256];
+
+    for col in 0..alignment.nchar() {
+        let mut observed_count = 0usize;
+        for row in &alignment.rows {
+            let byte = row.seq[col].to_ascii_uppercase();
+            let character = byte as usize;
+            if column[character] == 0 {
+                observed[observed_count] = byte;
+                observed_count += 1;
+            }
+            column[character] += 1;
+            statistics.characters[character] += 1;
+        }
+
+        let mut informative_states = 0usize;
+        let mut difference_states = 0usize;
+        let mut max_difference_count = 0usize;
+        for &byte in &observed[..observed_count] {
+            let count = column[byte as usize];
+            if !matches!(byte, b'-' | b'N' | b'?') && count >= 2 {
+                informative_states += 1;
+            }
+            if !matches!(byte, b'-' | b'N' | b'?' | b'X') {
+                difference_states += 1;
+                max_difference_count = max_difference_count.max(count);
+            }
+            column[byte as usize] = 0;
+        }
+
+        statistics.informative += usize::from(informative_states >= 2);
+        if difference_states >= 2 {
+            statistics.counted += 1;
+            statistics.differences += 1;
+        } else if difference_states == 1 && max_difference_count > 1 {
+            statistics.counted += 1;
         }
     }
-    false
-}
-
-/// Mirrors `get_differences`: returns (counted, differs).
-fn differences(mut counts: HashMap<u8, usize>) -> (bool, bool) {
-    counts.remove(&b'-');
-    counts.remove(&b'N');
-    counts.remove(&b'?');
-    counts.remove(&b'X');
-    let sufficient_sites = counts.len();
-    if sufficient_sites >= 2 {
-        (true, true)
-    } else if sufficient_sites >= 1 && counts.values().max().copied().unwrap_or(0) > 1 {
-        (true, false)
-    } else {
-        (false, false)
-    }
+    statistics
 }
 
 /// Mirrors `compute_informative_sites`: (sum_informative_sites,
 /// sum_differences, sum_counted_sites) across every column.
 pub fn compute_informative_sites(alignment: &Alignment) -> (usize, usize, usize) {
-    let ncols = alignment.nchar();
-    let mut informative = 0usize;
-    let mut diffs = 0usize;
-    let mut counted = 0usize;
-    for col in 0..ncols {
-        let counts = column_counts(alignment, col);
-        if is_informative(counts.clone()) {
-            informative += 1;
-        }
-        let (is_counted, differs) = differences(counts);
-        if is_counted {
-            counted += 1;
-            if differs {
-                diffs += 1;
-            }
-        }
-    }
-    (informative, diffs, counted)
+    let statistics = compute_site_statistics(alignment);
+    (
+        statistics.informative,
+        statistics.differences,
+        statistics.counted,
+    )
 }
 
 #[cfg(test)]
@@ -98,5 +99,18 @@ mod tests {
         assert_eq!(informative, 0);
         assert_eq!(counted, 1);
         assert_eq!(diffs, 1);
+    }
+
+    #[test]
+    fn character_totals_are_collected_in_the_same_pass() {
+        let a = Alignment::from_pairs(vec![
+            ("a".to_string(), "a?-".to_string()),
+            ("b".to_string(), "ANN".to_string()),
+        ]);
+        let statistics = compute_site_statistics(&a);
+        assert_eq!(statistics.characters[b'A' as usize], 2);
+        assert_eq!(statistics.characters[b'N' as usize], 2);
+        assert_eq!(statistics.characters[b'?' as usize], 1);
+        assert_eq!(statistics.characters[b'-' as usize], 1);
     }
 }

@@ -41,19 +41,30 @@ pub fn run(
     output_dir: &Path,
     input_format: &str,
     binary: bool,
+    cores: usize,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     crate::output_path::prepare_output_dir(output_dir)?;
     let files = find_alignment_files(alignments_dir, input_format)?;
+    crate::parallel::ensure_unique_output_names(files.iter().map(|file| {
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let stem = name.split('.').next().unwrap_or(name);
+        format!("{stem}.nexus")
+    }))?;
     let translate = if binary {
         binary_translate
     } else {
         ry_translate
     };
 
-    for file in &files {
+    let count = files.len();
+    crate::parallel::try_map_ordered(files, cores, |file| {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let stem = name.split('.').next().unwrap_or(name);
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(&file, input_format)?;
         let recoded = Alignment {
             rows: alignment
                 .rows
@@ -66,6 +77,9 @@ pub fn run(
         };
         let out_path = output_dir.join(format!("{stem}.nexus"));
         std::fs::write(out_path, format_nexus(&recoded))?;
+        Ok(())
+    })?;
+    for _ in 0..count {
         print!(".");
     }
     crate::cli_info!();

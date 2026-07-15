@@ -26,30 +26,42 @@ pub fn run(
     taxa: Option<usize>,
     input_format: &str,
     output_format: &str,
+    cores: usize,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     anyhow::ensure!(
         output_format == "fasta" || output_format == "nexus",
         "output format '{output_format}' is not yet supported (only fasta/nexus)"
     );
     crate::output_path::prepare_output_dir(output_dir)?;
     let files = find_alignment_files(alignments_dir, input_format)?;
+    crate::parallel::ensure_unique_output_names(files.iter().map(|file| {
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let stem = name.split('.').next().unwrap_or(name);
+        format!("{stem}.{output_format}")
+    }))?;
 
     print!("Running");
     let mut all_taxa: HashSet<String> = HashSet::new();
-    for file in &files {
+    let count = files.len();
+    let taxa_sets = crate::parallel::try_map_ordered(files, cores, |file| {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let stem = name.split('.').next().unwrap_or(name);
         let fname = strip_charset(stem, "_phased");
         let re = Regex::new(&format!("^(_R_)*{}_*", regex::escape(&fname)))?;
 
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(&file, input_format)?;
+        let mut file_taxa = HashSet::new();
         let mut rows = Vec::with_capacity(alignment.rows.len());
-        for row in &alignment.rows {
+        for row in alignment.rows {
             let new_name = re.replacen(&row.id, 1, "").to_string();
-            all_taxa.insert(new_name.clone());
+            file_taxa.insert(new_name.clone());
             rows.push(AlignmentRow {
                 id: new_name,
-                seq: row.seq.clone(),
+                seq: row.seq,
             });
         }
         if let Some(expected) = taxa {
@@ -66,6 +78,12 @@ pub fn run(
         } else {
             std::fs::write(out_path, format_nexus(&new_alignment))?;
         }
+        Ok(file_taxa)
+    })?;
+    for file_taxa in taxa_sets {
+        all_taxa.extend(file_taxa);
+    }
+    for _ in 0..count {
         print!(".");
     }
     crate::cli_info!();

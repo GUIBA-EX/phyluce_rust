@@ -1,12 +1,234 @@
 //! CLI wiring for `phyluce align concatenate-alignments`, mirroring
-//! `phyluce_align_concatenate_alignments`.
+//! `phyluce_align_concatenate_alignments` with a disk-backed matrix.
 
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::fs::{File, OpenOptions};
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use phyluce_align::concat::{concatenate, format_phylip, format_sets_block};
-use phyluce_align::nexus::format_nexus_with_interleave;
+use phyluce_align::concat::{format_sets_block, Charset};
+use phyluce_align::nexus::safename;
 
 use crate::informative_sites_cmd::{find_alignment_files, load_alignment};
+
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+struct ScratchMatrix {
+    path: PathBuf,
+    file: File,
+}
+
+struct ConcatenationMetadata {
+    taxa: Vec<String>,
+    taxon_index: HashMap<String, usize>,
+    charsets: Vec<Charset>,
+    locus_taxa: Vec<HashSet<String>>,
+    total_length: usize,
+}
+
+impl Drop for ScratchMatrix {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn create_scratch_matrix() -> anyhow::Result<ScratchMatrix> {
+    for _ in 0..1000 {
+        let serial = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "phyluce-concatenate-{}-{serial}.matrix",
+            std::process::id()
+        ));
+        match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => return Ok(ScratchMatrix { path, file }),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    anyhow::bail!("could not allocate a concatenation scratch file")
+}
+
+fn collect_metadata(
+    files: &[PathBuf],
+    input_format: &str,
+) -> anyhow::Result<ConcatenationMetadata> {
+    let mut taxa = Vec::new();
+    let mut taxon_index = HashMap::new();
+    let mut charsets = Vec::with_capacity(files.len());
+    let mut locus_taxa = Vec::with_capacity(files.len());
+    let mut total_length = 0usize;
+
+    for file in files {
+        let alignment = load_alignment(file, input_format)?;
+        for row in &alignment.rows {
+            if !taxon_index.contains_key(&row.id) {
+                taxon_index.insert(row.id.clone(), taxa.len());
+                taxa.push(row.id.clone());
+            }
+        }
+        locus_taxa.push(alignment.rows.iter().map(|row| row.id.clone()).collect());
+        let stop = total_length
+            .checked_add(alignment.nchar())
+            .ok_or_else(|| anyhow::anyhow!("concatenated alignment length overflow"))?;
+        charsets.push(Charset {
+            name: file
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("")
+                .to_string(),
+            start: total_length,
+            stop,
+        });
+        total_length = stop;
+    }
+    Ok(ConcatenationMetadata {
+        taxa,
+        taxon_index,
+        charsets,
+        locus_taxa,
+        total_length,
+    })
+}
+
+fn initialize_missing_matrix(
+    scratch: &mut File,
+    taxa: usize,
+    total_length: usize,
+) -> anyhow::Result<()> {
+    let matrix_size = taxa
+        .checked_mul(total_length)
+        .ok_or_else(|| anyhow::anyhow!("concatenated matrix size overflow"))?;
+    let missing = [b'?'; 64 * 1024];
+    let mut remaining = matrix_size;
+    while remaining > 0 {
+        let count = remaining.min(missing.len());
+        scratch.write_all(&missing[..count])?;
+        remaining -= count;
+    }
+    scratch.flush()?;
+    Ok(())
+}
+
+fn populate_matrix(
+    scratch: &mut File,
+    files: &[PathBuf],
+    input_format: &str,
+    taxon_index: &HashMap<String, usize>,
+    charsets: &[Charset],
+    locus_taxa: &[HashSet<String>],
+    total_length: usize,
+) -> anyhow::Result<()> {
+    for ((file, charset), expected_taxa) in files.iter().zip(charsets).zip(locus_taxa) {
+        let alignment = load_alignment(file, input_format)?;
+        let expected_length = charset.stop - charset.start;
+        anyhow::ensure!(
+            alignment.nchar() == expected_length,
+            "alignment {} changed between concatenation passes: expected {expected_length} characters, found {}",
+            file.display(),
+            alignment.nchar()
+        );
+        let actual_taxa: HashSet<&str> = alignment.rows.iter().map(|row| row.id.as_str()).collect();
+        anyhow::ensure!(
+            actual_taxa.len() == expected_taxa.len()
+                && expected_taxa
+                    .iter()
+                    .all(|taxon| actual_taxa.contains(taxon.as_str())),
+            "alignment {} changed taxon membership between concatenation passes",
+            file.display()
+        );
+        for row in alignment.rows {
+            let row_index = *taxon_index.get(&row.id).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "alignment {} introduced taxon {:?} between concatenation passes",
+                    file.display(),
+                    row.id
+                )
+            })?;
+            let offset = row_index
+                .checked_mul(total_length)
+                .and_then(|value| value.checked_add(charset.start))
+                .ok_or_else(|| anyhow::anyhow!("concatenated matrix offset overflow"))?;
+            scratch.seek(SeekFrom::Start(offset as u64))?;
+            scratch.write_all(&row.seq)?;
+        }
+    }
+    scratch.flush()?;
+    Ok(())
+}
+
+fn copy_taxon_sequence(
+    scratch: &mut File,
+    output: &mut impl Write,
+    taxon_index: usize,
+    total_length: usize,
+) -> anyhow::Result<()> {
+    let offset = taxon_index
+        .checked_mul(total_length)
+        .ok_or_else(|| anyhow::anyhow!("concatenated matrix offset overflow"))?;
+    scratch.seek(SeekFrom::Start(offset as u64))?;
+    std::io::copy(&mut scratch.take(total_length as u64), output)?;
+    Ok(())
+}
+
+fn write_phylip(
+    path: &Path,
+    scratch: &mut File,
+    taxa: &[String],
+    total_length: usize,
+) -> anyhow::Result<()> {
+    let mut output = BufWriter::new(File::create(path)?);
+    writeln!(output, "{} {}", taxa.len(), total_length)?;
+    for (index, taxon) in taxa.iter().enumerate() {
+        write!(output, "{} ", safename(taxon))?;
+        copy_taxon_sequence(scratch, &mut output, index, total_length)?;
+        writeln!(output)?;
+    }
+    output.flush()?;
+    Ok(())
+}
+
+fn write_nexus(
+    path: &Path,
+    scratch: &mut File,
+    taxa: &[String],
+    total_length: usize,
+    charsets: &[Charset],
+) -> anyhow::Result<()> {
+    let quoted: Vec<String> = taxa.iter().map(|taxon| safename(taxon)).collect();
+    let name_length = quoted
+        .iter()
+        .map(|name| name.chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut output = BufWriter::new(File::create(path)?);
+    writeln!(output, "#NEXUS\nbegin data;")?;
+    writeln!(
+        output,
+        "dimensions ntax={} nchar={total_length};",
+        taxa.len()
+    )?;
+    writeln!(output, "format datatype=dna missing=? gap=-;\nmatrix")?;
+    if total_length > 0 {
+        for (index, name) in quoted.iter().enumerate() {
+            write!(
+                output,
+                "{name}{}",
+                " ".repeat(name_length + 1 - name.chars().count())
+            )?;
+            copy_taxon_sequence(scratch, &mut output, index, total_length)?;
+            writeln!(output)?;
+        }
+    }
+    write!(output, ";\nend;\n{}", format_sets_block(charsets))?;
+    output.flush()?;
+    Ok(())
+}
 
 pub fn run(
     alignments_dir: &Path,
@@ -22,41 +244,87 @@ pub fn run(
     crate::output_path::prepare_output_dir(output_dir)?;
 
     let mut files = find_alignment_files(alignments_dir, input_format)?;
-    files.sort();
-    let mut loaded: Vec<(String, phyluce_align::Alignment)> = Vec::with_capacity(files.len());
-    for file in &files {
-        let name = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-        let alignment = load_alignment(file, input_format)?;
-        loaded.push((name, alignment));
-    }
-    // mirrors `data.sort()` on (basename, Nexus) tuples: unique basenames
-    // make this equivalent to sorting by name alone.
-    loaded.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let (combined, charsets) = concatenate(&loaded);
+    files.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+    let metadata = collect_metadata(&files, input_format)?;
+    let mut scratch = create_scratch_matrix()?;
+    initialize_missing_matrix(
+        &mut scratch.file,
+        metadata.taxa.len(),
+        metadata.total_length,
+    )?;
+    populate_matrix(
+        &mut scratch.file,
+        &files,
+        input_format,
+        &metadata.taxon_index,
+        &metadata.charsets,
+        &metadata.locus_taxa,
+        metadata.total_length,
+    )?;
 
     let output_name = output_dir
         .file_name()
-        .and_then(|n| n.to_str())
+        .and_then(|name| name.to_str())
         .unwrap_or("concatenated");
-
     if as_phylip {
-        let concat_path = output_dir.join(format!("{output_name}.phylip"));
-        let charset_path = output_dir.join(format!("{output_name}.charsets"));
-        std::fs::write(charset_path, format_sets_block(&charsets))?;
-        std::fs::write(concat_path, format_phylip(&combined))?;
+        write_phylip(
+            &output_dir.join(format!("{output_name}.phylip")),
+            &mut scratch.file,
+            &metadata.taxa,
+            metadata.total_length,
+        )?;
+        std::fs::write(
+            output_dir.join(format!("{output_name}.charsets")),
+            format_sets_block(&metadata.charsets),
+        )?;
     } else {
-        let concat_path = output_dir.join(format!("{output_name}.nexus"));
-        // `Nexus.write_nexus_data` is called directly (not via
-        // `Bio.AlignIO`'s `format()`), whose own `interleave` default is
-        // always `False` regardless of alignment length.
-        let mut text = format_nexus_with_interleave(&combined, false);
-        text.push_str(&format_sets_block(&charsets));
-        std::fs::write(concat_path, text)?;
+        write_nexus(
+            &output_dir.join(format!("{output_name}.nexus")),
+            &mut scratch.file,
+            &metadata.taxa,
+            metadata.total_length,
+            &metadata.charsets,
+        )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_alignment_changes_between_passes() {
+        let root =
+            std::env::temp_dir().join(format!("phyluce-concat-consistency-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let input = root.join("locus.fasta");
+        std::fs::write(&input, ">a\nAAAA\n>b\nAAAA\n").unwrap();
+        let files = vec![input.clone()];
+        let metadata = collect_metadata(&files, "fasta").unwrap();
+        let mut scratch = create_scratch_matrix().unwrap();
+        initialize_missing_matrix(
+            &mut scratch.file,
+            metadata.taxa.len(),
+            metadata.total_length,
+        )
+        .unwrap();
+
+        std::fs::write(&input, ">a\nAA\n>b\nAA\n").unwrap();
+        let error = populate_matrix(
+            &mut scratch.file,
+            &files,
+            "fasta",
+            &metadata.taxon_index,
+            &metadata.charsets,
+            &metadata.locus_taxa,
+            metadata.total_length,
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("changed between concatenation passes"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

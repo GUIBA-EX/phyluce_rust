@@ -16,9 +16,21 @@
 
 ## 用户手册
 
-中文用户手册见 [docs/user-manual-zh.md](docs/user-manual-zh.md)。手册按原版
-`phyluce_*` 脚本的使用方式组织，包含安装配置、UCE 主流程、各命令域示例、
-旧脚本名兼容、已知差异和故障排查。
+文档入口见 [docs/index.md](docs/index.md)，完整中文手册见
+[docs/user-manual-zh.md](docs/user-manual-zh.md)。手册包含构建配置、端到端 UCE
+流程、质量检查、各命令域示例、旧脚本名兼容、已知差异和故障排查。
+
+快速构建并检查命令入口：
+
+```text
+cargo build -p phyluce-cli --release
+target/release/phyluce --version
+target/release/phyluce --help
+target/release/phyluce config inspect
+```
+
+MAFFT、LASTZ、SPAdes 等外部程序只在相应步骤中需要，路径通过
+`phyluce.conf` 配置。原始 reads 的接头和质量清理应在进入本 CLI 前完成。
 
 ## CLI 形式
 
@@ -60,6 +72,12 @@ phyluce align convert-degen-bases
   仍存在下列差异。
 - 新增基于 `tracing` 的可选文件日志：全局参数 `--log-path` 和
   `--verbosity`。默认不写日志，不改变 stdout/stderr。
+- alignment 统计改为固定数组单次扫描；trimming、MAFFT、格式转换和过滤类
+  命令支持由 `--cores` 控制的确定性文件级并行。
+- `run-multiple-lastzs-sqlite` 使用有界全局任务队列流式处理所有 genome 的
+  染色体和约 10 Mbp scaffold 分块；完成的 genome 会立即合并并逐行写入 SQLite。
+- concatenation 使用两遍解析和磁盘暂存矩阵，避免同时保留全部 locus 与完整
+  拼接矩阵；FASTA/NEXUS 解析复用缓冲区并减少中间复制。
 - 扩展兼容性测试，优先使用已有 fixture，随机、外部工具或历史兼容问题路径
   保留合成 smoke test。
 

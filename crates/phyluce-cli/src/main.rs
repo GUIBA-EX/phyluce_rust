@@ -86,6 +86,7 @@ mod multi_fasta_table_cmd;
 mod multi_merge_table_cmd;
 mod ncbi_prep_cmd;
 mod output_path;
+mod parallel;
 mod probe_bed_from_lastz_cmd;
 mod randomly_sample_concat_cmd;
 mod reconstruct_uce_from_probe_cmd;
@@ -473,12 +474,9 @@ enum ProbeAction {
         #[arg(long, alias = "min_match", conflicts_with = "coverage")]
         min_match: Option<i64>,
     },
-    /// Equivalent to `phyluce_probe_run_multiple_lastzs_sqlite`. Untested
-    /// (`lastz` not installed) and runs one un-chunked/un-parallelized
-    /// `lastz` invocation per genome instead of the Python original's
-    /// `multiprocessing`-chunked runner -- see
-    /// `run_multiple_lastzs_sqlite_cmd` docs. `--cores` is accepted but
-    /// unused.
+    /// Equivalent to `phyluce_probe_run_multiple_lastzs_sqlite`. Splits
+    /// chromosome targets by sequence and scaffold targets into roughly
+    /// 10 Mbp chunks, then runs LASTZ with at most `--cores` workers.
     RunMultipleLastzsSqlite {
         #[arg(long)]
         db: PathBuf,
@@ -495,7 +493,7 @@ enum ProbeAction {
         #[arg(long, default_value_t = false)]
         no_dir: bool,
         #[arg(long, default_value_t = 1)]
-        cores: u32,
+        cores: usize,
         #[arg(long)]
         genome_base_path: String,
         #[arg(long, default_value_t = 83.0)]
@@ -959,6 +957,8 @@ enum AlignAction {
         max_divergence: f64,
         #[arg(long, default_value_t = 100)]
         min_length: usize,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_seqcap_align`: align each locus in a
     /// monolithic UCE FASTA with MAFFT, optionally trim, and write NEXUS
@@ -986,6 +986,8 @@ enum AlignAction {
         max_divergence: f64,
         #[arg(long, default_value_t = 100)]
         min_length: usize,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_get_informative_sites`.
     GetInformativeSites {
@@ -1007,7 +1009,7 @@ enum AlignAction {
         output_stats: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         show_taxon_counts: bool,
-        /// Accepted for compatibility; processing is currently serial.
+        /// Number of alignment files to summarize concurrently.
         #[arg(long, default_value_t = 1)]
         cores: usize,
     },
@@ -1061,6 +1063,8 @@ enum AlignAction {
         input_format: String,
         #[arg(long, default_value = "nexus")]
         output_format: String,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_get_ry_recoded_alignments`. Output
     /// format is always NEXUS.
@@ -1073,6 +1077,8 @@ enum AlignAction {
         input_format: String,
         #[arg(long, default_value_t = false)]
         binary: bool,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_extract_taxa_from_alignments`.
     ExtractTaxaFromAlignments {
@@ -1112,6 +1118,8 @@ enum AlignAction {
         min_length: usize,
         #[arg(long, default_value_t = 0)]
         min_taxa: usize,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_convert_one_align_to_another`
     /// (fasta/nexus only; see `convert_cmd` docs for what's not yet
@@ -1125,6 +1133,8 @@ enum AlignAction {
         input_format: String,
         #[arg(long, default_value = "fasta")]
         output_format: String,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_get_gblocks_trimmed_alignments_from_untrimmed`.
     /// Untested against a live Gblocks binary in this environment.
@@ -1145,6 +1155,8 @@ enum AlignAction {
         b4: u32,
         #[arg(long, default_value = "nexus")]
         output_format: String,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_get_trimal_trimmed_alignments_from_untrimmed`.
     /// Untested against a live trimAl binary in this environment.
@@ -1157,6 +1169,8 @@ enum AlignAction {
         input_format: String,
         #[arg(long, default_value = "nexus")]
         output_format: String,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_convert_degen_bases`.
     ConvertDegenBases {
@@ -1168,6 +1182,8 @@ enum AlignAction {
         input_format: String,
         #[arg(long, default_value = "nexus")]
         output_format: String,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_explode_alignments`.
     ExplodeAlignments {
@@ -1235,6 +1251,8 @@ enum AlignAction {
         percent: f64,
         #[arg(long, default_value = "nexus")]
         input_format: String,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_get_taxon_locus_counts_in_alignments`.
     GetTaxonLocusCountsInAlignments {
@@ -1296,6 +1314,8 @@ enum AlignAction {
         input_format: String,
         #[arg(long, default_value = "nexus")]
         output_format: String,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_screen_alignments_for_problems`.
     ScreenAlignmentsForProblems {
@@ -1309,6 +1329,8 @@ enum AlignAction {
         do_not_screen_x: bool,
         #[arg(long, default_value = "nexus")]
         input_format: String,
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
     },
     /// Equivalent to `phyluce_align_get_smilogram_from_alignments`. Ties
     /// in major-allele selection are broken deterministically instead of
@@ -2020,7 +2042,7 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
             scaffoldlist,
             append,
             no_dir,
-            cores: _cores,
+            cores,
             genome_base_path,
             coverage,
             identity,
@@ -2033,6 +2055,7 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
                 genome_base_path,
                 coverage,
                 identity,
+                cores,
             };
             run_multiple_lastzs_sqlite_cmd::run(&db, &output, &probefile, &args)
         }
@@ -2114,6 +2137,7 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             threshold,
             max_divergence,
             min_length,
+            cores,
         } => get_trimmed_cmd::run(
             &alignments,
             &output,
@@ -2122,6 +2146,7 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             threshold,
             max_divergence,
             min_length,
+            cores,
         ),
         AlignAction::SeqcapAlign {
             input,
@@ -2135,6 +2160,7 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             threshold,
             max_divergence,
             min_length,
+            cores,
         } => seqcap_align_cmd::run(
             &input,
             &output,
@@ -2147,6 +2173,7 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             threshold,
             max_divergence,
             min_length,
+            cores,
         ),
         AlignAction::GetInformativeSites {
             alignments,
@@ -2199,13 +2226,15 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             output,
             input_format,
             output_format,
-        } => remove_empty_taxa_cmd::run(&alignments, &output, &input_format, &output_format),
+            cores,
+        } => remove_empty_taxa_cmd::run(&alignments, &output, &input_format, &output_format, cores),
         AlignAction::GetRyRecodedAlignments {
             alignments,
             output,
             input_format,
             binary,
-        } => ry_recode_cmd::run(&alignments, &output, &input_format, binary),
+            cores,
+        } => ry_recode_cmd::run(&alignments, &output, &input_format, binary, cores),
         AlignAction::ExtractTaxaFromAlignments {
             alignments,
             output,
@@ -2233,6 +2262,7 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             containing_data_for,
             min_length,
             min_taxa,
+            cores,
         } => filter_alignments_cmd::run(
             &alignments,
             &output,
@@ -2240,13 +2270,15 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             &containing_data_for,
             min_length,
             min_taxa,
+            cores,
         ),
         AlignAction::ConvertOneAlignToAnother {
             alignments,
             output,
             input_format,
             output_format,
-        } => convert_cmd::run(&alignments, &output, &input_format, &output_format),
+            cores,
+        } => convert_cmd::run(&alignments, &output, &input_format, &output_format, cores),
         AlignAction::GetGblocksTrimmedAlignmentsFromUntrimmed {
             alignments,
             output,
@@ -2256,6 +2288,7 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             b3,
             b4,
             output_format,
+            cores,
         } => gblocks_cmd::run(
             &alignments,
             &output,
@@ -2265,19 +2298,24 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             b3,
             b4,
             &output_format,
+            cores,
         ),
         AlignAction::GetTrimalTrimmedAlignmentsFromUntrimmed {
             alignments,
             output,
             input_format,
             output_format,
-        } => trimal_cmd::run(&alignments, &output, &input_format, &output_format),
+            cores,
+        } => trimal_cmd::run(&alignments, &output, &input_format, &output_format, cores),
         AlignAction::ConvertDegenBases {
             alignments,
             output,
             input_format,
             output_format,
-        } => convert_degen_bases_cmd::run(&alignments, &output, &input_format, &output_format),
+            cores,
+        } => {
+            convert_degen_bases_cmd::run(&alignments, &output, &input_format, &output_format, cores)
+        }
         AlignAction::ExplodeAlignments {
             alignments,
             output,
@@ -2322,7 +2360,8 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             output,
             percent,
             input_format,
-        } => min_taxa_filter_cmd::run(&alignments, taxa, &output, percent, &input_format),
+            cores,
+        } => min_taxa_filter_cmd::run(&alignments, taxa, &output, percent, &input_format, cores),
         AlignAction::GetTaxonLocusCountsInAlignments {
             alignments,
             input_format,
@@ -2353,19 +2392,29 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             taxa,
             input_format,
             output_format,
-        } => remove_locus_name_cmd::run(&alignments, &output, taxa, &input_format, &output_format),
+            cores,
+        } => remove_locus_name_cmd::run(
+            &alignments,
+            &output,
+            taxa,
+            &input_format,
+            &output_format,
+            cores,
+        ),
         AlignAction::ScreenAlignmentsForProblems {
             alignments,
             output,
             do_not_screen_n,
             do_not_screen_x,
             input_format,
+            cores,
         } => screen_alignments_cmd::run(
             &alignments,
             &output,
             do_not_screen_n,
             do_not_screen_x,
             &input_format,
+            cores,
         ),
         AlignAction::GetSmilogramFromAlignments {
             alignments,
@@ -3003,5 +3052,105 @@ mod cli_compat_tests {
         let mut flank = base.to_vec();
         flank.extend_from_slice(&["--flank", "500", "--contig_orient"]);
         Cli::try_parse_from(flank).unwrap();
+    }
+
+    #[test]
+    fn parallel_core_counts_reach_command_actions() {
+        let summary = Cli::try_parse_from([
+            "phyluce",
+            "align",
+            "get-align-summary-data",
+            "--alignments",
+            "in",
+            "--cores",
+            "4",
+        ])
+        .unwrap();
+        assert!(matches!(
+            summary.command,
+            Commands::Align {
+                action: AlignAction::GetAlignSummaryData { cores: 4, .. }
+            }
+        ));
+
+        let lastz = Cli::try_parse_from([
+            "phyluce",
+            "probe",
+            "run-multiple-lastzs-sqlite",
+            "--db",
+            "matches.sqlite",
+            "--output",
+            "lastz",
+            "--probefile",
+            "probes.fasta",
+            "--genome-base-path",
+            "genomes",
+            "--cores",
+            "6",
+        ])
+        .unwrap();
+        assert!(matches!(
+            lastz.command,
+            Commands::Probe {
+                action: ProbeAction::RunMultipleLastzsSqlite { cores: 6, .. }
+            }
+        ));
+
+        let trimming = Cli::try_parse_from([
+            "phyluce",
+            "align",
+            "get-trimmed-alignments-from-untrimmed",
+            "--alignments",
+            "in",
+            "--output",
+            "out",
+            "--cores",
+            "3",
+        ])
+        .unwrap();
+        assert!(matches!(
+            trimming.command,
+            Commands::Align {
+                action: AlignAction::GetTrimmedAlignmentsFromUntrimmed { cores: 3, .. }
+            }
+        ));
+
+        let conversion = Cli::try_parse_from([
+            "phyluce",
+            "align",
+            "convert-one-align-to-another",
+            "--alignments",
+            "in",
+            "--output",
+            "out",
+            "--cores",
+            "5",
+        ])
+        .unwrap();
+        assert!(matches!(
+            conversion.command,
+            Commands::Align {
+                action: AlignAction::ConvertOneAlignToAnother { cores: 5, .. }
+            }
+        ));
+
+        let filtering = Cli::try_parse_from([
+            "phyluce",
+            "align",
+            "filter-alignments",
+            "--alignments",
+            "in",
+            "--output",
+            "out",
+            "--cores",
+            "7",
+        ])
+        .unwrap();
+        assert!(matches!(
+            filtering.command,
+            Commands::Align {
+                action: AlignAction::FilterAlignments { cores: 7, .. }
+            }
+        ));
     }
 }

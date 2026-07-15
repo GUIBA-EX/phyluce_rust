@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::sites::compute_informative_sites;
+use crate::sites::compute_site_statistics;
 use crate::Alignment;
 
 #[derive(Debug, Clone)]
@@ -42,19 +42,19 @@ impl AlignSummary {
 /// Mirrors `summary.get_stats` (minus the file/name bookkeeping, which the
 /// CLI layer handles).
 pub fn compute_align_summary(alignment: &Alignment) -> AlignSummary {
-    let mut characters: HashMap<u8, usize> = HashMap::new();
-    for row in &alignment.rows {
-        for &c in &row.seq {
-            *characters.entry(c.to_ascii_uppercase()).or_insert(0) += 1;
-        }
-    }
-    let (sum_informative_sites, sum_differences, sum_counted_sites) =
-        compute_informative_sites(alignment);
+    let statistics = compute_site_statistics(alignment);
+    let characters = statistics
+        .characters
+        .iter()
+        .enumerate()
+        .filter(|(_, count)| **count != 0)
+        .map(|(character, &count)| (character as u8, count))
+        .collect();
     AlignSummary {
         length: alignment.nchar(),
-        sum_informative_sites,
-        sum_differences,
-        sum_counted_sites,
+        sum_informative_sites: statistics.informative,
+        sum_differences: statistics.differences,
+        sum_counted_sites: statistics.counted,
         characters,
     }
 }

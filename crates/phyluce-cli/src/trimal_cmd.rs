@@ -19,7 +19,9 @@ pub fn run(
     output_dir: &Path,
     input_format: &str,
     output_format: &str,
+    cores: usize,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     anyhow::ensure!(
         matches!(output_format, "fasta" | "nexus"),
         "output format '{output_format}' is not supported (only fasta/nexus)"
@@ -30,7 +32,16 @@ pub fn run(
     let trimal_bin = cfg.get_user_path("binaries", "trimal")?;
 
     let files = find_alignment_files(alignments_dir, input_format)?;
-    for file in &files {
+    crate::parallel::ensure_unique_output_names(files.iter().map(|file| {
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let stem = name.split('.').next().unwrap_or(name);
+        format!("{stem}.{output_format}")
+    }))?;
+    let count = files.len();
+    let warnings = crate::parallel::try_map_ordered(files, cores, |file| {
         let name = file
             .file_name()
             .and_then(|n| n.to_str())
@@ -41,9 +52,10 @@ pub fn run(
             .to_string();
 
         let trimmed_path = std::path::PathBuf::from(format!("{}-trimal", file.display()));
+        crate::output_path::remove_stale_file(&trimmed_path)?;
         let output = std::process::Command::new(&trimal_bin)
             .arg("-in")
-            .arg(file)
+            .arg(&file)
             .arg("-out")
             .arg(&trimmed_path)
             .arg("-automated1")
@@ -62,13 +74,12 @@ pub fn run(
         let records = read_fasta(&trimmed_path)?;
         std::fs::remove_file(&trimmed_path)?;
         if records.is_empty() {
-            crate::cli_warn!("Missing information for locus {name}");
-            print!(".");
-            continue;
+            return Ok(Some(format!("Missing information for locus {name}")));
         }
         let trimmed = phyluce_align::Alignment::from_pairs(
             records.into_iter().map(|r| (r.id, r.sequence)).collect(),
         );
+        trimmed.validate()?;
 
         let ext = output_format;
         let out_path = output_dir.join(format!("{name}.{ext}"));
@@ -80,6 +91,12 @@ pub fn run(
         } else {
             std::fs::write(out_path, format_nexus(&trimmed))?;
         }
+        Ok(None)
+    })?;
+    for warning in warnings.into_iter().flatten() {
+        crate::cli_warn!("{warning}");
+    }
+    for _ in 0..count {
         print!(".");
     }
     crate::cli_info!();

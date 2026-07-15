@@ -27,7 +27,9 @@ pub fn run(
     output_dir: &Path,
     input_format: &str,
     output_format: &str,
+    cores: usize,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     anyhow::ensure!(
         matches!(output_format, "fasta" | "nexus"),
         "output format '{output_format}' is not supported (only fasta/nexus)"
@@ -35,9 +37,10 @@ pub fn run(
     crate::output_path::prepare_output_dir(output_dir)?;
     let files = find_alignment_files(alignments_dir, input_format)?;
 
-    for file in &files {
+    let count = files.len();
+    crate::parallel::try_map_ordered(files, cores, |file| {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(&file, input_format)?;
 
         let rows: Vec<AlignmentRow> = alignment
             .rows
@@ -65,6 +68,9 @@ pub fn run(
             }
             _ => unreachable!("output format was validated above"),
         }
+        Ok(())
+    })?;
+    for _ in 0..count {
         print!(".");
     }
     crate::cli_info!();

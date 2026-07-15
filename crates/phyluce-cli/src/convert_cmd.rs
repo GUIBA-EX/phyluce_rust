@@ -15,7 +15,9 @@ pub fn run(
     output_dir: &Path,
     input_format: &str,
     output_format: &str,
+    cores: usize,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     anyhow::ensure!(
         output_format == "fasta" || output_format == "nexus",
         "output format '{output_format}' is not yet supported (only fasta/nexus)"
@@ -27,11 +29,20 @@ pub fn run(
         "There are no {input_format}-formatted alignments in {}",
         alignments_dir.display()
     );
+    crate::parallel::ensure_unique_output_names(files.iter().map(|file| {
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let stem = name.split('.').next().unwrap_or(name);
+        format!("{stem}.{output_format}")
+    }))?;
 
-    for file in &files {
+    let count = files.len();
+    crate::parallel::try_map_ordered(files, cores, |file| {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let stem = name.split('.').next().unwrap_or(name);
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(&file, input_format)?;
         let out_path = output_dir.join(format!("{stem}.{output_format}"));
         if output_format == "fasta" {
             let mut out = std::fs::File::create(out_path)?;
@@ -41,6 +52,9 @@ pub fn run(
         } else {
             std::fs::write(out_path, format_nexus(&alignment))?;
         }
+        Ok(())
+    })?;
+    for _ in 0..count {
         print!(".");
     }
     crate::cli_info!();

@@ -49,12 +49,24 @@ pub fn read_fasta(path: &Path) -> Result<Vec<FastaRecord>, FastaError> {
 }
 
 /// Parse FASTA records from an existing buffered reader.
-pub fn read_fasta_reader(reader: impl BufRead) -> Result<Vec<FastaRecord>, FastaError> {
+pub fn read_fasta_reader(mut reader: impl BufRead) -> Result<Vec<FastaRecord>, FastaError> {
     let mut records = Vec::new();
     let mut current: Option<(String, String, String)> = None;
+    let mut line = String::new();
+    let mut line_number = 0usize;
 
-    for (i, line) in reader.lines().enumerate() {
-        let line = line?;
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            break;
+        }
+        line_number += 1;
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
         if let Some(header) = line.strip_prefix('>') {
             if let Some((id, description, sequence)) = current.take() {
                 records.push(FastaRecord {
@@ -68,7 +80,7 @@ pub fn read_fasta_reader(reader: impl BufRead) -> Result<Vec<FastaRecord>, Fasta
         } else if !line.trim().is_empty() {
             match &mut current {
                 Some((_, _, seq)) => seq.push_str(line.trim()),
-                None => return Err(FastaError::DataBeforeHeader { line: i + 1 }),
+                None => return Err(FastaError::DataBeforeHeader { line: line_number }),
             }
         }
     }

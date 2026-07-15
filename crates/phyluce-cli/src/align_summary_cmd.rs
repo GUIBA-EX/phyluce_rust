@@ -9,6 +9,33 @@ use phyluce_align::summary::compute_align_summary;
 
 use crate::informative_sites_cmd::{find_alignment_files, load_alignment};
 
+type SummaryRow = (String, usize, f64, phyluce_align::summary::AlignSummary);
+
+fn summarize_file(file: PathBuf, input_format: &str) -> anyhow::Result<SummaryRow> {
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    let alignment = load_alignment(&file, input_format)?;
+    let summary = compute_align_summary(&alignment);
+    let denominator = alignment.ntax() * alignment.nchar();
+    let missing = if denominator == 0 {
+        0.0
+    } else {
+        summary.char_count(b'?') as f64 / denominator as f64
+    };
+    Ok((name, alignment.ntax(), missing, summary))
+}
+
+fn summarize_files(
+    files: Vec<PathBuf>,
+    input_format: &str,
+    cores: usize,
+) -> anyhow::Result<Vec<SummaryRow>> {
+    crate::parallel::try_map_ordered(files, cores, |file| summarize_file(file, input_format))
+}
+
 pub fn run(
     alignments_dir: &Path,
     input_format: &str,
@@ -19,23 +46,7 @@ pub fn run(
     anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     let files = find_alignment_files(alignments_dir, input_format)?;
     anyhow::ensure!(!files.is_empty(), "no {input_format} alignments found");
-    let mut rows = Vec::new();
-    for file in &files {
-        let name = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-        let alignment = load_alignment(file, input_format)?;
-        let s = compute_align_summary(&alignment);
-        let missing = alignment
-            .rows
-            .iter()
-            .map(|row| row.seq.iter().filter(|&&c| c == b'?').count())
-            .sum::<usize>() as f64
-            / (alignment.ntax() * alignment.nchar()) as f64;
-        rows.push((name, alignment.ntax(), missing, s));
-    }
+    let rows = summarize_files(files, input_format, cores)?;
 
     print_aggregate_summary(&rows, show_taxon_counts)?;
 
@@ -81,10 +92,7 @@ fn ci95(values: &[f64]) -> f64 {
     1.96 * variance.sqrt() / (values.len() as f64).sqrt()
 }
 
-fn print_aggregate_summary(
-    rows: &[(String, usize, f64, phyluce_align::summary::AlignSummary)],
-    show_taxon_counts: bool,
-) -> anyhow::Result<()> {
+fn print_aggregate_summary(rows: &[SummaryRow], show_taxon_counts: bool) -> anyhow::Result<()> {
     let lengths: Vec<f64> = rows.iter().map(|(_, _, _, s)| s.length as f64).collect();
     let sites: Vec<f64> = rows
         .iter()
@@ -204,5 +212,36 @@ mod tests {
         assert_eq!(mean(&values), 20.0);
         assert!((ci95(&values) - 11.316_065).abs() < 0.000_001);
         assert!(ci95(&[10.0]).is_nan());
+    }
+
+    #[test]
+    fn parallel_summary_matches_serial_order_and_values() {
+        let directory = std::env::temp_dir().join(format!(
+            "phyluce-align-summary-parallel-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        for index in 0..6 {
+            let sequence = if index % 2 == 0 { "ACGTAA" } else { "ACGTCC" };
+            std::fs::write(
+                directory.join(format!("locus-{index}.fasta")),
+                format!(">a\n{sequence}\n>b\n{sequence}\n"),
+            )
+            .unwrap();
+        }
+        let files = find_alignment_files(&directory, "fasta").unwrap();
+        let serial = summarize_files(files.clone(), "fasta", 1).unwrap();
+        let parallel = summarize_files(files, "fasta", 3).unwrap();
+
+        assert_eq!(serial.len(), parallel.len());
+        for (serial, parallel) in serial.iter().zip(&parallel) {
+            assert_eq!(serial.0, parallel.0);
+            assert_eq!(serial.1, parallel.1);
+            assert_eq!(serial.2, parallel.2);
+            assert_eq!(serial.3.length, parallel.3.length);
+            assert_eq!(serial.3.characters, parallel.3.characters);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

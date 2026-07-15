@@ -35,6 +35,15 @@ pub fn output_file(directory: &Path, filename: &str) -> anyhow::Result<PathBuf> 
     Ok(directory.join(path))
 }
 
+/// Remove a fixed-name sidecar from a previous external-tool invocation.
+pub fn remove_stale_file(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +73,15 @@ mod tests {
         std::fs::write(directory.join("stale.nex"), "x").unwrap();
         assert!(prepare_output_dir(&directory).is_err());
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn removes_stale_sidecars_and_accepts_missing_files() {
+        let path =
+            std::env::temp_dir().join(format!("phyluce-stale-sidecar-{}", std::process::id()));
+        std::fs::write(&path, "old").unwrap();
+        remove_stale_file(&path).unwrap();
+        assert!(!path.exists());
+        remove_stale_file(&path).unwrap();
     }
 }

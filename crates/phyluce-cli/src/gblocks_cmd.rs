@@ -25,7 +25,9 @@ pub fn run(
     b3: u32,
     b4: u32,
     output_format: &str,
+    cores: usize,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     anyhow::ensure!(b4 >= 2, "--b4 must be >= 2");
     anyhow::ensure!(
         matches!(output_format, "fasta" | "nexus"),
@@ -37,7 +39,16 @@ pub fn run(
     let gblocks_bin = cfg.get_user_path("binaries", "gblocks")?;
 
     let files = find_alignment_files(alignments_dir, input_format)?;
-    for file in &files {
+    crate::parallel::ensure_unique_output_names(files.iter().map(|file| {
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let stem = name.split('.').next().unwrap_or(name);
+        format!("{stem}.{output_format}")
+    }))?;
+    let count = files.len();
+    let warnings = crate::parallel::try_map_ordered(files, cores, |file| {
         let name = file
             .file_name()
             .and_then(|n| n.to_str())
@@ -46,7 +57,7 @@ pub fn run(
             .next()
             .unwrap_or("")
             .to_string();
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(&file, input_format)?;
         let taxa = alignment.ntax();
 
         let b1_arg = (b1 * taxa as f64).round() as i64 + 1;
@@ -55,8 +66,14 @@ pub fn run(
             b2_arg = b1_arg;
         }
 
+        // Gblocks writes beside the input using a fixed `-gb` suffix. Remove
+        // any prior result so a failed invocation cannot be mistaken for a
+        // successful current run.
+        let trimmed_path = std::path::PathBuf::from(format!("{}-gb", file.display()));
+        crate::output_path::remove_stale_file(&trimmed_path)?;
+
         let output = std::process::Command::new(&gblocks_bin)
-            .arg(file)
+            .arg(&file)
             .arg("-t=DNA")
             .arg(format!("-b1={b1_arg}"))
             .arg(format!("-b2={b2_arg}"))
@@ -70,23 +87,19 @@ pub fn run(
         // legacy script never checks the exit code, only whether the
         // `-gb` output file exists afterward.
 
-        // Mirrors `"{}-gb".format(align_file)`: a literal `-gb` suffix
-        // appended to the whole path, not an extension replacement.
-        let trimmed_path = std::path::PathBuf::from(format!("{}-gb", file.display()));
         if !trimmed_path.is_file() {
             anyhow::ensure!(
                 output.status.success(),
                 "Gblocks failed for locus {name}: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             );
-            crate::cli_warn!("Missing information for locus {name}");
-            print!(".");
-            continue;
+            return Ok(Some(format!("Missing information for locus {name}")));
         }
         let records = read_fasta(&trimmed_path)?;
         let trimmed = phyluce_align::Alignment::from_pairs(
             records.into_iter().map(|r| (r.id, r.sequence)).collect(),
         );
+        trimmed.validate()?;
         std::fs::remove_file(&trimmed_path)?;
 
         let ext = output_format;
@@ -99,6 +112,12 @@ pub fn run(
         } else {
             std::fs::write(out_path, format_nexus(&trimmed))?;
         }
+        Ok(None)
+    })?;
+    for warning in warnings.into_iter().flatten() {
+        crate::cli_warn!("{warning}");
+    }
+    for _ in 0..count {
         print!(".");
     }
     crate::cli_info!();

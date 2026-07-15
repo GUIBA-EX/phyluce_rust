@@ -70,26 +70,32 @@ fn python_round(x: f64) -> i64 {
 fn compute_good_columns(alignment: &Alignment, majority: i64) -> Vec<bool> {
     let ncols = alignment.nchar();
     let mut good = Vec::with_capacity(ncols);
+    let mut counts = [0i64; 256];
+    let mut observed = [0u8; 256];
     for col in 0..ncols {
-        let mut counts: std::collections::HashMap<u8, i64> = std::collections::HashMap::new();
+        let mut observed_count = 0usize;
         let mut gap_count = 0i64;
+        let mut max_count = 0i64;
         for row in &alignment.rows {
             let c = row.seq[col];
-            *counts.entry(c).or_insert(0) += 1;
+            if counts[c as usize] == 0 {
+                observed[observed_count] = c;
+                observed_count += 1;
+            }
+            counts[c as usize] += 1;
             if c == b'-' {
                 gap_count += 1;
+            } else {
+                max_count = max_count.max(counts[c as usize]);
             }
         }
         if gap_count <= majority {
-            let max_count = counts
-                .iter()
-                .filter(|(&c, _)| c != b'-')
-                .map(|(_, v)| *v)
-                .max()
-                .unwrap_or(0);
             good.push(max_count >= majority);
         } else {
             good.push(false);
+        }
+        for &character in &observed[..observed_count] {
+            counts[character as usize] = 0;
         }
     }
     good
@@ -214,25 +220,35 @@ fn get_ends(seq: &[u8]) -> (usize, usize) {
 /// Mirrors `_alignment_consensus`'s per-column majority-base pick (ties
 /// broken by first-seen order among uppercased column characters, as
 /// `collections.Counter.most_common` does).
-fn consensus_char(column: &[u8]) -> u8 {
-    let mut order: Vec<u8> = Vec::new();
-    let mut counts: std::collections::HashMap<u8, usize> = std::collections::HashMap::new();
-    for &c in column {
-        *counts.entry(c).or_insert_with(|| {
-            order.push(c);
-            0
-        }) += 1;
+fn consensus_char(
+    alignment: &Alignment,
+    col: usize,
+    counts: &mut [usize; 256],
+    observed: &mut [u8; 256],
+) -> u8 {
+    let mut observed_count = 0usize;
+    for row in &alignment.rows {
+        let byte = row.seq[col].to_ascii_uppercase();
+        let character = byte as usize;
+        if counts[character] == 0 {
+            observed[observed_count] = byte;
+            observed_count += 1;
+        }
+        counts[character] += 1;
     }
-    let mut best_char = order[0];
-    let mut best_count = counts[&best_char];
-    for &c in &order[1..] {
-        let cnt = counts[&c];
-        if cnt > best_count {
-            best_count = cnt;
-            best_char = c;
+    let mut best_char = observed[0];
+    let mut best_count = counts[best_char as usize];
+    for &byte in &observed[1..observed_count] {
+        let count = counts[byte as usize];
+        if count > best_count {
+            best_char = byte;
+            best_count = count;
         }
     }
-    if best_count as f64 / column.len() as f64 >= 0.5 {
+    for &character in &observed[..observed_count] {
+        counts[character as usize] = 0;
+    }
+    if best_count as f64 / alignment.ntax() as f64 >= 0.5 {
         best_char
     } else {
         b'N'
@@ -242,13 +258,10 @@ fn consensus_char(column: &[u8]) -> u8 {
 fn compute_consensus(alignment: &Alignment) -> Vec<u8> {
     let ncols = alignment.nchar();
     let mut result = Vec::with_capacity(ncols);
+    let mut counts = [0usize; 256];
+    let mut observed = [0u8; 256];
     for col in 0..ncols {
-        let column: Vec<u8> = alignment
-            .rows
-            .iter()
-            .map(|r| r.seq[col].to_ascii_uppercase())
-            .collect();
-        result.push(consensus_char(&column));
+        result.push(consensus_char(alignment, col, &mut counts, &mut observed));
     }
     result
 }

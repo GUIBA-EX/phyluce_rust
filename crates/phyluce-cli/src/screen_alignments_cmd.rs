@@ -15,27 +15,40 @@ pub fn run(
     do_not_screen_n: bool,
     do_not_screen_x: bool,
     input_format: &str,
+    cores: usize,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     crate::output_path::prepare_output_dir(output_dir)?;
     let files = find_alignment_files(alignments_dir, input_format)?;
 
-    let mut count = 0usize;
-    for file in &files {
+    let results = crate::parallel::try_map_ordered(files, cores, |file| {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(&file, input_format)?;
 
         let has_n = !do_not_screen_n && alignment.rows.iter().any(|r| has_bad_base(&r.seq, b'N'));
         let has_x = !do_not_screen_x && alignment.rows.iter().any(|r| has_bad_base(&r.seq, b'X'));
 
         if !has_n && !has_x {
-            std::fs::copy(file, output_dir.join(name))?;
-            count += 1;
+            std::fs::copy(&file, output_dir.join(name))?;
+            Ok((true, None))
         } else if has_n {
-            crate::cli_warn!("Removed locus {name} due to presence of N bases");
+            Ok((
+                false,
+                Some(format!("Removed locus {name} due to presence of N bases")),
+            ))
         } else {
-            crate::cli_warn!("Removed locus {name} due to presence of X bases");
+            Ok((
+                false,
+                Some(format!("Removed locus {name} due to presence of X bases")),
+            ))
+        }
+    })?;
+    for (_, warning) in &results {
+        if let Some(warning) = warning {
+            crate::cli_warn!("{warning}");
         }
     }
+    let count = results.iter().filter(|(copied, _)| *copied).count();
     crate::cli_info!("Copied {count} good alignments");
     Ok(())
 }
