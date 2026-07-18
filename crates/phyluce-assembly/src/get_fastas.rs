@@ -23,6 +23,8 @@ pub enum GetFastasError {
     UnexpectedMissingData { organism: String, uce: String },
     #[error("cannot find a fasta file for {name} with any of the extensions ({extensions})")]
     ContigFileNotFound { name: String, extensions: String },
+    #[error("taxon {taxon:?} is not a column in {table}")]
+    UnknownTaxonColumn { taxon: String, table: &'static str },
 }
 
 /// One resolved UCE match: the UCE locus name and the strand the probe hit
@@ -64,6 +66,7 @@ pub fn get_nodes_for_uces(
     } else {
         "match_map"
     };
+    ensure_taxon_column(conn, table, organism)?;
     let in_list = vec!["?"; uces.len()].join(",");
     let column = ident(organism);
     let table = qualified_ident(table);
@@ -97,6 +100,30 @@ pub fn get_nodes_for_uces(
         }
     }
     Ok((node_dict, missing))
+}
+
+fn ensure_taxon_column(
+    conn: &Connection,
+    table: &'static str,
+    organism: &str,
+) -> Result<(), GetFastasError> {
+    let pragma = match table {
+        "match_map" => "PRAGMA table_info(match_map)",
+        "extended.match_map" => "PRAGMA extended.table_info(match_map)",
+        _ => unreachable!("only match_map tables are validated"),
+    };
+    let mut statement = conn.prepare(pragma)?;
+    let columns: std::collections::HashSet<String> = statement
+        .query_map([], |row| row.get(1))?
+        .collect::<Result<_, _>>()?;
+    if columns.contains(organism) {
+        Ok(())
+    } else {
+        Err(GetFastasError::UnknownTaxonColumn {
+            taxon: organism.to_string(),
+            table,
+        })
+    }
 }
 
 /// Build the `^({header_fragments})\(([+-])\)` (case-insensitive) regex

@@ -24,6 +24,8 @@ pub enum MatchCountError {
         "--sample-size must be between 1 and one less than the number of taxa ({taxa}), got {size}"
     )]
     InvalidSampleSize { size: usize, taxa: usize },
+    #[error("taxon {taxon:?} is not a column in {table}")]
+    UnknownTaxonColumn { taxon: String, table: &'static str },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -52,32 +54,19 @@ pub struct SampleOptimization {
 /// `--taxon-list-config`.
 pub fn read_taxon_list_config(path: &Path) -> std::io::Result<HashMap<String, Vec<String>>> {
     let text = std::fs::read_to_string(path)?;
-    let mut sections: HashMap<String, Vec<String>> = HashMap::new();
-    let mut current: Option<String> = None;
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            let name = line[1..line.len() - 1].trim().to_string();
-            sections.entry(name.clone()).or_default();
-            current = Some(name);
-            continue;
-        }
-        if let Some(section) = &current {
-            let key = line
-                .split_once(':')
-                .or_else(|| line.split_once('='))
-                .map(|(k, _)| k.trim())
-                .unwrap_or(line);
-            sections
-                .entry(section.clone())
-                .or_default()
-                .push(key.to_string());
-        }
-    }
-    Ok(sections)
+    let ini = phyluce_config::Ini::parse_allow_no_value(&text);
+    Ok(ini
+        .section_names()
+        .map(|section| {
+            let entries = ini
+                .entries(section)
+                .unwrap_or_default()
+                .iter()
+                .map(|(key, _)| key.clone())
+                .collect();
+            (section.to_string(), entries)
+        })
+        .collect())
 }
 
 /// Mirrors `get_names_from_config`: taxon names for a group, `-` replaced
@@ -157,7 +146,7 @@ fn remove_duplicates_from(
 pub fn matches_by_organism(
     conn: &Connection,
     organisms: &[String],
-) -> rusqlite::Result<HashMap<String, HashSet<String>>> {
+) -> Result<HashMap<String, HashSet<String>>, MatchCountError> {
     let mut out = HashMap::new();
     for organism in organisms {
         let (table, column) = if let Some(stripped) = organism.strip_suffix('*') {
@@ -165,6 +154,13 @@ pub fn matches_by_organism(
         } else {
             ("matches", organism.clone())
         };
+        ensure_taxon_column(conn, table, &column, organism)?;
+        let map_table = if organism.ends_with('*') {
+            "extended.match_map"
+        } else {
+            "match_map"
+        };
+        ensure_taxon_column(conn, map_table, &column, organism)?;
         let table = qualified_ident(table);
         let column = ident(&column);
         let query = format!("SELECT uce FROM {table} WHERE {column} = 1");
@@ -176,6 +172,33 @@ pub fn matches_by_organism(
         out.insert(organism.clone(), deduped.into_iter().collect());
     }
     Ok(out)
+}
+
+fn ensure_taxon_column(
+    conn: &Connection,
+    table: &'static str,
+    column: &str,
+    taxon: &str,
+) -> Result<(), MatchCountError> {
+    let pragma = match table {
+        "matches" => "PRAGMA table_info(matches)",
+        "match_map" => "PRAGMA table_info(match_map)",
+        "extended.matches" => "PRAGMA extended.table_info(matches)",
+        "extended.match_map" => "PRAGMA extended.table_info(match_map)",
+        _ => unreachable!("only match tables are validated"),
+    };
+    let mut statement = conn.prepare(pragma)?;
+    let columns: HashSet<String> = statement
+        .query_map([], |row| row.get(1))?
+        .collect::<Result<_, _>>()?;
+    if columns.contains(column) {
+        Ok(())
+    } else {
+        Err(MatchCountError::UnknownTaxonColumn {
+            taxon: taxon.to_string(),
+            table,
+        })
+    }
 }
 
 /// Mirrors `return_complete_matrix(..., fast=False)`: the UCE loci shared
@@ -429,7 +452,11 @@ mod tests {
         let dir = std::env::temp_dir().join("phyluce-assembly-conf-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("taxon-set.conf");
-        std::fs::write(&path, "[all]\nalligator_mississippiensis\ngallus-gallus\n").unwrap();
+        std::fs::write(
+            &path,
+            "[all]\n; an ordinary INI comment\nalligator_mississippiensis\ngallus-gallus\n",
+        )
+        .unwrap();
         let cfg = read_taxon_list_config(&path).unwrap();
         assert_eq!(
             cfg.get("all").unwrap(),
@@ -440,6 +467,21 @@ mod tests {
         );
         let names = names_from_config(&cfg, "all").unwrap();
         assert_eq!(names, vec!["alligator_mississippiensis", "gallus_gallus"]);
+    }
+
+    #[test]
+    fn rejects_unknown_taxon_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE matches (uce TEXT PRIMARY KEY, known INTEGER);
+             CREATE TABLE match_map (uce TEXT PRIMARY KEY, known TEXT);",
+        )
+        .unwrap();
+        let error = matches_by_organism(&conn, &["missing".to_string()]).unwrap_err();
+        assert!(matches!(
+            error,
+            MatchCountError::UnknownTaxonColumn { ref taxon, table: "matches" } if taxon == "missing"
+        ));
     }
 
     #[test]

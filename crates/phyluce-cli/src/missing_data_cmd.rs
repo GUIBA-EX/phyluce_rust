@@ -15,32 +15,10 @@ use crate::informative_sites_cmd::{find_alignment_files, load_alignment};
 /// a cross-crate dependency for a handful of lines).
 fn read_section_list_config(path: &Path) -> std::io::Result<HashMap<String, Vec<String>>> {
     let text = std::fs::read_to_string(path)?;
-    let mut sections: HashMap<String, Vec<String>> = HashMap::new();
-    let mut current: Option<String> = None;
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            let name = line[1..line.len() - 1].trim().to_string();
-            sections.entry(name.clone()).or_default();
-            current = Some(name);
-            continue;
-        }
-        if let Some(section) = &current {
-            let key = line
-                .split_once(':')
-                .or_else(|| line.split_once('='))
-                .map(|(k, _)| k.trim())
-                .unwrap_or(line);
-            sections
-                .entry(section.clone())
-                .or_default()
-                .push(key.to_string());
-        }
-    }
-    Ok(sections)
+    Ok(crate::conf::parse_ini(&text)
+        .into_iter()
+        .map(|(section, entries)| (section, entries.into_iter().map(|(key, _)| key).collect()))
+        .collect())
 }
 
 /// Mirrors `seq.name.lstrip("_R_")`: Python's `str.lstrip` treats its

@@ -69,7 +69,7 @@ fn run_exhaustive_optimization(
     let report = format_exhaustive_report(&results);
     print!("{report}");
     tracing::info!(message = %report.trim_end());
-    std::fs::write(output, report)?;
+    crate::output_path::write_atomic(output, report)?;
     Ok(())
 }
 
@@ -102,7 +102,7 @@ fn run_random_optimization(
             .map(|(size, count)| format!("{size},{count}"))
             .collect::<Vec<_>>()
             .join("\n");
-        std::fs::write(output, counts)?;
+        crate::output_path::write_atomic(output, counts)?;
         return Ok(());
     }
 
@@ -124,7 +124,7 @@ fn run_random_optimization(
             "Writing the optimized taxa and loci in the data matrix to {}",
             output.display()
         );
-        std::fs::write(
+        crate::output_path::write_atomic(
             output,
             format_output(&result.best.organisms, &result.best.uces),
         )?;
@@ -154,6 +154,11 @@ pub fn run(
         !options.optimize || !incomplete_matrix_flag,
         "--optimize maximizes complete-matrix loci and cannot be combined with --incomplete-matrix"
     );
+    let mut protected_inputs = vec![locus_db, taxon_list_config];
+    if let Some(extend) = &extend_locus_db {
+        protected_inputs.push(extend);
+    }
+    crate::output_path::ensure_output_not_input(output, &protected_inputs)?;
 
     let conn = Connection::open(locus_db)?;
     if let Some(extend) = &extend_locus_db {
@@ -224,7 +229,7 @@ pub fn run(
             "Writing the taxa and loci in the data matrix to {}",
             output.display()
         );
-        std::fs::write(output, format_output(&organisms, &shared_uces))?;
+        crate::output_path::write_atomic(output, format_output(&organisms, &shared_uces))?;
     }
     Ok(())
 }
@@ -333,6 +338,22 @@ mod tests {
         options.samples = 3;
         run(&database, &config, "all", &output, false, None, options).unwrap();
         assert_eq!(std::fs::read_to_string(&output).unwrap(), "2,3\n2,3\n2,3");
+        std::fs::remove_dir_all(database.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn refuses_to_overwrite_the_locus_database() {
+        let (database, config, _) = fixture();
+        let error = run(&database, &config, "all", &database, false, None, options()).unwrap_err();
+        assert!(error.to_string().contains("must not overwrite input"));
+        assert_eq!(
+            Connection::open(&database)
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM matches", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
         std::fs::remove_dir_all(database.parent().unwrap()).unwrap();
     }
 }

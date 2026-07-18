@@ -6,27 +6,12 @@ use std::path::Path;
 /// Bare `[section]` item-list parser (`allow_no_value=True`-style),
 /// matching the sample-name list this command reads.
 fn read_bare_section(text: &str, section: &str) -> Vec<String> {
-    let mut items = Vec::new();
-    let mut current: Option<String> = None;
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            current = Some(line[1..line.len() - 1].trim().to_string());
-            continue;
-        }
-        if current.as_deref() == Some(section) {
-            let key = line
-                .split_once(':')
-                .or_else(|| line.split_once('='))
-                .map(|(k, _)| k.trim())
-                .unwrap_or(line);
-            items.push(key.to_string());
-        }
-    }
-    items
+    crate::conf::parse_ini(text)
+        .remove(section)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect()
 }
 
 fn glob_sorted(

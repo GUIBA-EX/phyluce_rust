@@ -153,29 +153,75 @@ pub fn process_taxon_lastz(
 ) -> Result<TaxonMatches, MatchError> {
     let mut result = TaxonMatches::default();
     for m in lastz_matches {
-        let contig_name = extract_contig_name(&m.name1, header_regex)?;
-        let uce_name = extract_probe_name(&m.name2, probe_regex)?;
-        if dupefile_active && dupes.contains(&uce_name) {
-            result.probe_dupes.insert(uce_name);
-        } else {
-            result
-                .matches
-                .entry(contig_name.clone())
-                .or_default()
-                .insert(uce_name.clone());
-            result
-                .orientation
-                .entry(uce_name.clone())
-                .or_default()
-                .insert(m.strand2.clone());
-            result
-                .revmatches
-                .entry(uce_name)
-                .or_default()
-                .insert(contig_name);
-        }
+        add_taxon_lastz_match(
+            &mut result,
+            m,
+            probe_regex,
+            header_regex,
+            dupes,
+            dupefile_active,
+        )?;
     }
     Ok(result)
+}
+
+/// Streaming form of [`process_taxon_lastz`], used for large per-taxon
+/// alignment files so match rows need not be retained after classification.
+pub fn process_taxon_lastz_iter<I>(
+    lastz_matches: I,
+    probe_regex: &Regex,
+    header_regex: &Regex,
+    dupes: &HashSet<String>,
+    dupefile_active: bool,
+) -> Result<TaxonMatches, MatchError>
+where
+    I: IntoIterator<Item = Result<LastzMatch, phyluce_io::lastz::LastzError>>,
+{
+    let mut result = TaxonMatches::default();
+    for m in lastz_matches {
+        let m = m?;
+        add_taxon_lastz_match(
+            &mut result,
+            &m,
+            probe_regex,
+            header_regex,
+            dupes,
+            dupefile_active,
+        )?;
+    }
+    Ok(result)
+}
+
+fn add_taxon_lastz_match(
+    result: &mut TaxonMatches,
+    m: &LastzMatch,
+    probe_regex: &Regex,
+    header_regex: &Regex,
+    dupes: &HashSet<String>,
+    dupefile_active: bool,
+) -> Result<(), MatchError> {
+    let contig_name = extract_contig_name(&m.name1, header_regex)?;
+    let uce_name = extract_probe_name(&m.name2, probe_regex)?;
+    if dupefile_active && dupes.contains(&uce_name) {
+        result.probe_dupes.insert(uce_name);
+    } else {
+        result
+            .matches
+            .entry(contig_name.clone())
+            .or_default()
+            .insert(uce_name.clone());
+        result
+            .orientation
+            .entry(uce_name.clone())
+            .or_default()
+            .insert(m.strand2.clone());
+        result
+            .revmatches
+            .entry(uce_name)
+            .or_default()
+            .insert(contig_name);
+    }
+    Ok(())
 }
 
 /// Contigs that matched more than one distinct UCE locus. Mirrors

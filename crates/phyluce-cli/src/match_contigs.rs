@@ -12,11 +12,11 @@ use anyhow::Context;
 use phyluce_assembly::{
     contig_count, contig_header_regex, contigs_matching_multiple_uces, db, extract_probe_name,
     get_probe_dupes, loci_matching_multiple_contigs, organism_names_from_fasta_paths,
-    process_taxon_lastz,
+    process_taxon_lastz_iter,
 };
 use phyluce_config::PhyluceConfig;
 use phyluce_external::ExternalCommand;
-use phyluce_io::lastz::read_lastz;
+use phyluce_io::lastz::{iter_lastz, read_lastz};
 use phyluce_io::read_fasta;
 use regex::Regex;
 
@@ -160,9 +160,8 @@ pub fn run(
             );
         }
 
-        let lastz_matches = read_lastz(&lastz_output, false)?;
-        let result = process_taxon_lastz(
-            &lastz_matches,
+        let result = process_taxon_lastz_iter(
+            iter_lastz(&lastz_output, false)?,
             &probe_regex,
             &header_regex,
             &dupes,

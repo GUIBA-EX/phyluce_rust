@@ -57,76 +57,110 @@ pub struct LastzMatch {
     pub percent_coverage: Option<f64>,
 }
 
-pub fn read_lastz(path: &Path, long_format: bool) -> Result<Vec<LastzMatch>, LastzError> {
-    let f = File::open(path)?;
-    let reader = BufReader::new(f);
+/// Streaming reader for LASTZ general-format output. One malformed row is
+/// returned as an error at its original line number without preloading the
+/// rest of the alignment file.
+pub struct LastzReader {
+    reader: BufReader<File>,
+    long_format: bool,
+    line: usize,
+}
+
+pub fn iter_lastz(path: &Path, long_format: bool) -> Result<LastzReader, LastzError> {
+    Ok(LastzReader {
+        reader: BufReader::new(File::open(path)?),
+        long_format,
+        line: 0,
+    })
+}
+
+impl Iterator for LastzReader {
+    type Item = Result<LastzMatch, LastzError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let mut line = String::new();
+            match self.reader.read_line(&mut line) {
+                Ok(0) => return None,
+                Ok(_) => {
+                    self.line += 1;
+                    let line = line.trim_end_matches(['\n', '\r']);
+                    if line.is_empty() {
+                        continue;
+                    }
+                    return Some(parse_lastz_line(line, self.line, self.long_format));
+                }
+                Err(error) => return Some(Err(error.into())),
+            }
+        }
+    }
+}
+
+fn parse_lastz_line(
+    line: &str,
+    lineno: usize,
+    long_format: bool,
+) -> Result<LastzMatch, LastzError> {
     let expected = if long_format { 19 } else { 17 };
-    let mut matches = Vec::new();
+    let mut fields: Vec<String> = line.split('\t').map(str::to_string).collect();
+    if fields.len() != expected {
+        return Err(LastzError::FieldCount {
+            line: lineno,
+            expected,
+            found: fields.len(),
+        });
+    }
 
-    for (i, line) in reader.lines().enumerate() {
-        let line = line?;
-        if line.is_empty() {
-            continue;
-        }
-        let lineno = i + 1;
-        let mut fields: Vec<String> = line.split('\t').map(str::to_string).collect();
-        if fields.len() != expected {
-            return Err(LastzError::FieldCount {
-                line: lineno,
-                expected,
-                found: fields.len(),
-            });
-        }
-
-        let get_int = |fields: &[String], idx: usize| -> Result<i64, LastzError> {
-            fields[idx].parse::<i64>().map_err(|_| LastzError::BadInt {
+    let get_int = |fields: &[String], idx: usize| -> Result<i64, LastzError> {
+        fields[idx].parse::<i64>().map_err(|_| LastzError::BadInt {
+            line: lineno,
+            field: idx,
+            value: fields[idx].clone(),
+        })
+    };
+    let get_percent = |fields: &[String], idx: usize| -> Result<f64, LastzError> {
+        fields[idx]
+            .trim_end_matches('%')
+            .parse::<f64>()
+            .map_err(|_| LastzError::BadPercent {
                 line: lineno,
                 field: idx,
                 value: fields[idx].clone(),
             })
-        };
-        let get_percent = |fields: &[String], idx: usize| -> Result<f64, LastzError> {
-            fields[idx]
-                .trim_end_matches('%')
-                .parse::<f64>()
-                .map_err(|_| LastzError::BadPercent {
-                    line: lineno,
-                    field: idx,
-                    value: fields[idx].clone(),
-                })
-        };
+    };
 
-        fields[1] = fields[1].trim_start_matches('>').to_string();
-        fields[6] = fields[6].trim_start_matches('>').to_string();
+    fields[1] = fields[1].trim_start_matches('>').to_string();
+    fields[6] = fields[6].trim_start_matches('>').to_string();
 
-        let m = LastzMatch {
-            score: fields[0].clone(),
-            name1: fields[1].clone(),
-            strand1: fields[2].clone(),
-            zstart1: get_int(&fields, 3)?,
-            end1: get_int(&fields, 4)?,
-            length1: get_int(&fields, 5)?,
-            name2: fields[6].clone(),
-            strand2: fields[7].clone(),
-            zstart2: get_int(&fields, 8)?,
-            end2: get_int(&fields, 9)?,
-            length2: get_int(&fields, 10)?,
-            diff: fields[11].clone(),
-            cigar: fields[12].clone(),
-            identity: fields[13].clone(),
-            percent_identity: get_percent(&fields, 14)?,
-            continuity: fields[15].clone(),
-            percent_continuity: get_percent(&fields, 16)?,
-            coverage: long_format.then(|| fields[17].clone()),
-            percent_coverage: if long_format {
-                Some(get_percent(&fields, 18)?)
-            } else {
-                None
-            },
-        };
-        matches.push(m);
-    }
-    Ok(matches)
+    Ok(LastzMatch {
+        score: fields[0].clone(),
+        name1: fields[1].clone(),
+        strand1: fields[2].clone(),
+        zstart1: get_int(&fields, 3)?,
+        end1: get_int(&fields, 4)?,
+        length1: get_int(&fields, 5)?,
+        name2: fields[6].clone(),
+        strand2: fields[7].clone(),
+        zstart2: get_int(&fields, 8)?,
+        end2: get_int(&fields, 9)?,
+        length2: get_int(&fields, 10)?,
+        diff: fields[11].clone(),
+        cigar: fields[12].clone(),
+        identity: fields[13].clone(),
+        percent_identity: get_percent(&fields, 14)?,
+        continuity: fields[15].clone(),
+        percent_continuity: get_percent(&fields, 16)?,
+        coverage: long_format.then(|| fields[17].clone()),
+        percent_coverage: if long_format {
+            Some(get_percent(&fields, 18)?)
+        } else {
+            None
+        },
+    })
+}
+
+pub fn read_lastz(path: &Path, long_format: bool) -> Result<Vec<LastzMatch>, LastzError> {
+    iter_lastz(path, long_format)?.collect()
 }
 
 #[cfg(test)]
@@ -151,7 +185,10 @@ mod tests {
                      ........................................................................................................................\t\
                      120M\t120/120\t100.0%\t120/120\t100.0%\n";
         let path = write_temp("one.lastz", line);
-        let matches = read_lastz(&path, false).unwrap();
+        let matches = iter_lastz(&path, false)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(matches.len(), 1);
         let m = &matches[0];
         assert_eq!(m.name1, "NODE_1_length_1151_cov_27.333029");

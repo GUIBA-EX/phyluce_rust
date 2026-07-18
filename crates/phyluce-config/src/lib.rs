@@ -151,7 +151,7 @@ impl PhyluceConfig {
         Self::load_from(None)
     }
 
-    /// Same as [`load`], but load only the packaged/default config -- mirrors
+    /// Same as [`Self::load`], but load only the packaged/default config -- mirrors
     /// `pth.get_user_path(..., package_only=True)`.
     pub fn load_package_only() -> Result<Self, ConfigError> {
         let default_path = Self::find_default_config();

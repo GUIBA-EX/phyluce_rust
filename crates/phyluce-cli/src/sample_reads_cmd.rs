@@ -5,8 +5,7 @@
 //! environment.
 
 use std::path::{Path, PathBuf};
-
-use phyluce_external::ExternalCommand;
+use std::process::{Command, Stdio};
 
 /// Simple xorshift RNG, consistent with the pattern used elsewhere in
 /// this port (e.g. `bootstrap_count_cmd`) -- not a reproduction of
@@ -31,9 +30,7 @@ impl SimpleRng {
 }
 
 fn count_fastq_reads(path: &Path) -> anyhow::Result<usize> {
-    let text = std::fs::read_to_string(path)?;
-    let lines = text.lines().count();
-    Ok(lines / 4)
+    Ok(phyluce_io::fastq::fastq_record_count(path)?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -66,25 +63,22 @@ fn run_seqtk(
         out_fname.display()
     );
 
-    let report = ExternalCommand::new(seqtk_bin)
-        .args([
-            "sample".to_string(),
-            format!("-s{rand}"),
-            fastq.to_string(),
-            reads.to_string(),
-        ])
-        .run()?;
-    use std::io::Write as _;
-    let mut out = std::fs::OpenOptions::new()
+    let out = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&out_fname)?;
-    out.write_all(report.stdout.as_bytes())?;
-    let mut err = std::fs::OpenOptions::new()
+    let err = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&err_fname)?;
-    err.write_all(report.stderr.as_bytes())?;
+    let seed = format!("-s{rand}");
+    let reads = reads.to_string();
+    let status = Command::new(seqtk_bin)
+        .args(["sample", &seed, fastq, &reads])
+        .stdout(Stdio::from(out))
+        .stderr(Stdio::from(err))
+        .status()?;
+    anyhow::ensure!(status.success(), "seqtk failed with status {status}");
     Ok(())
 }
 
@@ -122,7 +116,7 @@ fn sample_reads_with_seqtk(
 }
 
 pub fn run(conf: &Path, output: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output)?;
+    crate::output_path::prepare_output_dir(output)?;
     let cfg = phyluce_config::PhyluceConfig::load()?;
     let seqtk_bin = cfg.get_user_path("binaries", "seqtk")?;
 

@@ -29,6 +29,18 @@ pub fn fastq_lengths(path: &Path) -> Result<Vec<usize>, FastqError> {
     Ok(lengths)
 }
 
+/// Count FASTQ records without retaining their contents. This intentionally
+/// mirrors the legacy line-count behaviour for incomplete trailing records.
+pub fn fastq_record_count(path: &Path) -> Result<usize, FastqError> {
+    let reader = open_maybe_gz(path)?;
+    let mut lines = 0usize;
+    for line in reader.lines() {
+        line?;
+        lines += 1;
+    }
+    Ok(lines / 4)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,5 +56,6 @@ mod tests {
         f.write_all(b"@r1\nACGTACGT\n+\nIIIIIIII\n@r2\nACGT\n+\nIIII\n")
             .unwrap();
         assert_eq!(fastq_lengths(&path).unwrap(), vec![8, 4]);
+        assert_eq!(fastq_record_count(&path).unwrap(), 2);
     }
 }

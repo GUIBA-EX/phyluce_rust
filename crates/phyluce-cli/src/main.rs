@@ -192,9 +192,7 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         dryrun: bool,
     },
-    /// Probe-domain commands (mirrors `bin/probes/phyluce_probe_*`). Only
-    /// commands that don't invoke the `lastz` binary directly (`easy-lastz`,
-    /// `run-multiple-lastzs-sqlite`) are still unported.
+    /// Probe-domain commands (mirrors `bin/probes/phyluce_probe_*`).
     Probe {
         #[command(subcommand)]
         action: ProbeAction,
@@ -2739,29 +2737,11 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
 fn read_conf_section_items(path: &Path, sections: &[String]) -> anyhow::Result<HashSet<String>> {
     let text = std::fs::read_to_string(path)?;
     let wanted: HashSet<&str> = sections.iter().map(|s| s.as_str()).collect();
-    let mut items = HashSet::new();
-    let mut current: Option<String> = None;
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            current = Some(line[1..line.len() - 1].trim().to_string());
-            continue;
-        }
-        if let Some(section) = &current {
-            if wanted.contains(section.as_str()) {
-                let key = line
-                    .split_once(':')
-                    .or_else(|| line.split_once('='))
-                    .map(|(k, _)| k.trim())
-                    .unwrap_or(line);
-                items.insert(key.to_string());
-            }
-        }
-    }
-    Ok(items)
+    Ok(crate::conf::parse_ini(&text)
+        .into_iter()
+        .filter(|(section, _)| wanted.contains(section.as_str()))
+        .flat_map(|(_, entries)| entries.into_iter().map(|(key, _)| key))
+        .collect())
 }
 
 #[allow(clippy::too_many_arguments)]
