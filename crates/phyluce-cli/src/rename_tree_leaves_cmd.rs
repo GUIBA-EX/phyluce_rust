@@ -1,13 +1,10 @@
 //! CLI wiring for `phyluce genetrees rename-tree-leaves`, mirroring
 //! `phyluce_genetrees_rename_tree_leaves`.
-//!
-//! `--reroot` is not yet implemented (it requires physically restructuring
-//! the parsed tree, which none of the other genetree algorithms need).
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use phyluce_genetrees::newick::{parse_all, rename_leaves, write};
+use phyluce_genetrees::newick::{parse_all, rename_leaves, reroot_at_leaf_parent, write};
 
 use crate::conf::parse_ini;
 
@@ -19,8 +16,6 @@ pub fn run(
     order: &str,
     reroot: Option<&str>,
 ) -> anyhow::Result<()> {
-    anyhow::ensure!(reroot.is_none(), "--reroot is not yet implemented");
-
     let conf_text = std::fs::read_to_string(config)?;
     let sections = parse_ini(&conf_text);
     let entries = sections
@@ -43,7 +38,13 @@ pub fn run(
     let mut out = String::new();
     for tree in &trees {
         let renamed = rename_leaves(tree, &names);
-        out.push_str(&write(&renamed));
+        let final_tree = match reroot {
+            Some(taxon) => reroot_at_leaf_parent(&renamed, taxon).ok_or_else(|| {
+                anyhow::anyhow!("--reroot taxon {taxon:?} not found among tree leaves")
+            })?,
+            None => renamed,
+        };
+        out.push_str(&write(&final_tree));
         out.push('\n');
     }
     std::fs::write(output, out)?;

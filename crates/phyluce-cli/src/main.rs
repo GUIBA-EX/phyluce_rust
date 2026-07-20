@@ -59,6 +59,7 @@ mod conf;
 mod convert_cmd;
 mod convert_degen_bases_cmd;
 mod easy_lastz_cmd;
+mod easy_stampy_cmd;
 mod explode_alignments_cmd;
 mod explode_cmd;
 mod extract_contigs_to_barcodes_cmd;
@@ -88,6 +89,7 @@ mod ncbi_prep_cmd;
 mod output_path;
 mod parallel;
 mod probe_bed_from_lastz_cmd;
+mod probebwa_align;
 mod randomly_sample_concat_cmd;
 mod reconstruct_uce_from_probe_cmd;
 mod reduce_raxml_cmd;
@@ -472,6 +474,36 @@ enum ProbeAction {
         #[arg(long, alias = "min_match", conflicts_with = "coverage")]
         min_match: Option<i64>,
     },
+    /// Runs the stampy_ genome-prep + mapping workflow from
+    /// `docs/tutorials/tutorial-4.rst` using `probebwa`
+    /// (<https://github.com/GUIBA-EX/probebwa>), a stampy-compatible Rust
+    /// mapper, in place of `stampy.py`. Chains `probebwa build-genome`,
+    /// `build-hash`, and `map` in sequence; pass `--bam` to write BAM
+    /// directly instead of piping SAM through `samtools view` by hand.
+    /// Untested: `probebwa` isn't installed in this environment -- see
+    /// `probebwa_align` docs.
+    EasyStampy {
+        #[arg(long)]
+        species: String,
+        #[arg(long)]
+        assembly: String,
+        #[arg(long, num_args = 1..)]
+        genome_files: Vec<String>,
+        /// Prefix for the `.stidx`/`.sthash` files (mirrors stampy's `-G`/`-H`).
+        #[arg(long)]
+        index_prefix: PathBuf,
+        /// Read file(s) to map: one for single-ended, two (mate1 mate2) for paired-end.
+        #[arg(long, num_args = 1..=2)]
+        reads: Vec<String>,
+        #[arg(long, default_value_t = 0.05)]
+        substitution_rate: f64,
+        #[arg(long, default_value_t = 1)]
+        threads: usize,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        bam: bool,
+    },
     /// Equivalent to `phyluce_probe_run_multiple_lastzs_sqlite`. Splits
     /// chromosome targets by sequence and scaffold targets into roughly
     /// 10 Mbp chunks, then runs LASTZ with at most `--cores` workers.
@@ -503,8 +535,7 @@ enum ProbeAction {
 
 #[derive(Subcommand)]
 enum GenetreesAction {
-    /// Equivalent to `phyluce_genetrees_rename_tree_leaves`. `--reroot` is
-    /// not yet implemented.
+    /// Equivalent to `phyluce_genetrees_rename_tree_leaves`.
     RenameTreeLeaves {
         #[arg(long)]
         input: PathBuf,
@@ -910,8 +941,7 @@ enum UtilitiesAction {
         #[arg(long, default_value = "")]
         subfolder: String,
     },
-    /// Equivalent to `phyluce_utilities_merge_multiple_gzip_files`
-    /// (`--trimmed` not yet implemented).
+    /// Equivalent to `phyluce_utilities_merge_multiple_gzip_files`.
     MergeMultipleGzipFiles {
         #[arg(long)]
         config: PathBuf,
@@ -2058,6 +2088,27 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
             coverage,
             min_match,
         } => easy_lastz_cmd::run(&target, &query, &output, coverage, identity, min_match),
+        ProbeAction::EasyStampy {
+            species,
+            assembly,
+            genome_files,
+            index_prefix,
+            reads,
+            substitution_rate,
+            threads,
+            output,
+            bam,
+        } => easy_stampy_cmd::run(
+            &species,
+            &assembly,
+            &genome_files,
+            &index_prefix,
+            &reads,
+            substitution_rate,
+            threads,
+            &output,
+            bam,
+        ),
         ProbeAction::RunMultipleLastzsSqlite {
             db,
             output,

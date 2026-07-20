@@ -227,6 +227,48 @@ mod tests {
         path
     }
 
+    // Ad hoc benchmark for `read_fasta`'s per-line String allocation.
+    // Run with:
+    //   cargo +stable test --release -p phyluce-io --lib -- --ignored --nocapture bench_
+    #[test]
+    #[ignore]
+    fn bench_read_fasta_large_file() {
+        // ~5000 records * ~500bp, wrapped at 70 cols -- resembles a
+        // mid-size contig assembly FASTA.
+        let dir = std::env::temp_dir().join("phyluce-io-bench");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bench.fasta");
+        {
+            let mut f = std::io::BufWriter::new(File::create(&path).unwrap());
+            let bases = b"ACGT";
+            for i in 0..5_000usize {
+                writeln!(f, ">NODE_{i}_length_500_cov_10.3").unwrap();
+                for line in 0..8 {
+                    let mut buf = [0u8; 70];
+                    for (j, b) in buf.iter_mut().enumerate() {
+                        *b = bases[(i + line + j) % 4];
+                    }
+                    f.write_all(&buf).unwrap();
+                    f.write_all(b"\n").unwrap();
+                }
+            }
+        }
+        let file_len = std::fs::metadata(&path).unwrap().len();
+
+        let start = std::time::Instant::now();
+        let records = read_fasta(&path).unwrap();
+        let elapsed = start.elapsed();
+
+        eprintln!(
+            "[bench] read_fasta: {} bytes / {} records in {:?} ({:.1} MB/s)",
+            file_len,
+            records.len(),
+            elapsed,
+            (file_len as f64 / 1_000_000.0) / elapsed.as_secs_f64()
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
     #[test]
     fn writes_fasta_wrapped_at_60() {
         let seq = "A".repeat(65);

@@ -82,6 +82,27 @@ phyluce align convert-degen-bases
   拼接矩阵；FASTA/NEXUS 解析复用缓冲区并减少中间复制。
 - 扩展兼容性测试，优先使用已有 fixture，随机、外部工具或历史兼容问题路径
   保留合成 smoke test。
+- `merge-multiple-gzip-files --trimmed` 和 `rename-tree-leaves --reroot`
+  已实现（此前明确报错未实现）。`--trimmed` 复用 `phyluce-assembly::raw_reads`
+  的 R1/R2/singleton 文件发现逻辑，按 `<output>/<name>/split-adapter-quality-trimmed/`
+  目录结构合并；`--reroot` 在 `phyluce-genetrees::newick` 中实现了
+  edge-by-edge 的祖先链反转（reroot at a leaf's parent），语义与 DendroPy 的
+  `tree.reroot_at_node` 一致。
+- 新增 `probe easy-stampy`：用 [probebwa](https://github.com/GUIBA-EX/probebwa)
+  （stampy 算法的 Rust 复刻，CLI 兼容）替代教程里手动调用的 `stampy.py`，
+  一条命令依次跑通 `build-genome` → `build-hash` → `map`，`--bam` 时直接产出
+  BAM（无需再手动 `samtools view`）。`probebwa` 二进制路径在 `phyluce.conf`
+  的 `[binaries]` 段配置。
+- `match-contigs-to-probes` 的 contig/probe 名称提取新增手写扫描快路径
+  （`phyluce-assembly::fast_extract`），仅在 `--regex`/`[headers]`
+  与内置默认值字节完全一致、且输入为 ASCII 时启用；命中默认配置时端到端约
+  2.7x 提速（30 万行 LASTZ 记录基准：约 175ms → 约 63ms）。任何自定义正则
+  都继续走原有的通用正则路径，快路径不匹配时总会回落到正则确认，不会独立
+  报错，因此该模块的 bug 最多只影响性能，不影响匹配结果的正确性——已用
+  差分模糊测试（`fast_extract_*_matches_regex_oracle`，8 组随机种子 ×
+  合法/边界/垃圾/非 ASCII 输入）验证。同一批基准也验证过换用 `ahash`
+  替代标准库 `HashMap`/`HashSet` 本身收益很小（~10% 的耗时在哈希上，端到端
+  提升在噪声范围内），真正的瓶颈是正则匹配，不是哈希。
 
 ## 已知差异
 
@@ -92,12 +113,14 @@ phyluce align convert-degen-bases
   MUSCLE 3/Clustal 路径时传入 `--muscle-binary`。
 - 少数历史脚本存在运行时兼容性问题；Rust 版本按预期行为实现，而不是复现
   运行时失败。
-- `merge-multiple-gzip-files --trimmed`、`rename-tree-leaves --reroot`、部分
-  alignment 输出格式尚未移植。对应选项会明确报错，不能作为
+- 部分 legacy alignment 输出格式尚未移植；对应选项会明确报错，不能作为
   原版脚本的无条件替换。
 - bootstrap replicate 使用纯文本格式，不兼容原版 Python `pickle` 中间文件；
   同一流程中不要混用两种实现。
 - 部分 genetree 命令当前仅接受 Newick 输入，原版支持的其他树文件结构需先转换。
+- `probe easy-stampy` 依赖的 `probebwa` 尚未在染色体级（人类等）基因组上做过
+  真实数据验证，目前只在 E. coli 规模上跟 stampy-old 逐条比对过；大基因组场景
+  建议先自行验证再用于生产。
 
 ## 开发检查
 

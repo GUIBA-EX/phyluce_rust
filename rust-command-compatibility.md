@@ -49,9 +49,37 @@ phyluce_workflow
   search behavior. Exhaustive rows are also written to the required output
   path, `--keep-counts` writes its CSV correctly, and Rust adds `--seed` for
   reproducible sampling.
-- `merge-multiple-gzip-files --trimmed`, `rename-tree-leaves --reroot`, and
-  several legacy alignment output formats are not implemented.
-  These options fail explicitly rather than silently changing behavior.
+- `merge-multiple-gzip-files --trimmed` and `rename-tree-leaves --reroot` are
+  implemented. `--trimmed` reuses `phyluce-assembly::raw_reads`'s R1/R2/
+  singleton file discovery and writes `<output>/<name>/
+  split-adapter-quality-trimmed/`; `--reroot` reroots at a leaf's parent by
+  inverting the ancestor chain edge-by-edge, matching DendroPy's
+  `tree.reroot_at_node` semantics (see `phyluce-genetrees::newick`).
+  Several legacy alignment output formats are still not implemented and
+  fail explicitly rather than silently changing behavior.
+- `probe easy-stampy` replaces the hand-run `stampy.py` workflow from
+  `docs/tutorials/tutorial-4.rst` with
+  [probebwa](https://github.com/GUIBA-EX/probebwa), a stampy-compatible
+  Rust mapper, chaining `build-genome` → `build-hash` → `map`. `--bam`
+  writes BAM directly (no manual `samtools view` step). Configure the
+  binary path under `[binaries] probebwa` in `phyluce.conf`. `probebwa`
+  itself hasn't been validated on chromosome-scale (e.g. human) genomes yet
+  -- see its own README for the E. coli-scale validation it has had.
+- `match-contigs-to-probes`'s contig/probe name extraction has a
+  hand-rolled fast path (`phyluce-assembly::fast_extract`) that activates
+  only when `--regex`/`[headers]` are byte-identical to the packaged
+  defaults and the input is ASCII; any customization keeps using the
+  general regex engine unchanged. Benchmarked at ~2.7x end to end (300k
+  synthetic LASTZ rows: ~175ms -> ~63ms). The fast path only ever
+  *confirms* a match -- a `None` always falls through to `Regex::captures`
+  rather than independently reporting "no match" -- so a bug there can only
+  cost performance, never produce a wrong name; verified with differential
+  fuzz tests (`fast_extract_*_matches_regex_oracle`) across 8 seeds and
+  valid/boundary/garbage/non-ASCII inputs. The same benchmark suite found
+  that swapping `ahash` in for the standard library's `HashMap`/`HashSet`
+  is not worth it on its own: hashing is only ~10% of the pipeline's time,
+  so the end-to-end gain was within run-to-run noise -- regex matching, not
+  hashing, was the actual bottleneck.
 
 ## Logging
 

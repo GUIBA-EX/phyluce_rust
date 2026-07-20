@@ -298,6 +298,71 @@ pub fn rename_leaves(node: &Node, mapping: &HashMap<String, String>) -> Node {
     }
 }
 
+/// Reroot the tree at the parent of the leaf named `leaf_label`, mirroring
+/// DendroPy's `tree.reroot_at_node(leaf.parent_node)`: the leaf's parent
+/// becomes the new root, keeping its own children, with the rest of the
+/// tree grafted on as one extra child (the path back to the old root is
+/// inverted edge-by-edge). Returns `None` if no leaf has that label.
+pub fn reroot_at_leaf_parent(root: &Node, leaf_label: &str) -> Option<Node> {
+    let path = find_leaf_parent_path(root, leaf_label)?;
+    Some(reroot_at_path(root, &path))
+}
+
+/// Path of child indices from `node` down to the parent of the leaf named
+/// `label` (empty if `node` itself is that parent).
+fn find_leaf_parent_path(node: &Node, label: &str) -> Option<Vec<usize>> {
+    if node
+        .children
+        .iter()
+        .any(|c| c.is_leaf() && c.label.as_deref() == Some(label))
+    {
+        return Some(Vec::new());
+    }
+    for (i, child) in node.children.iter().enumerate() {
+        if let Some(mut sub) = find_leaf_parent_path(child, label) {
+            let mut full = vec![i];
+            full.append(&mut sub);
+            return Some(full);
+        }
+    }
+    None
+}
+
+fn reroot_at_path(root: &Node, path: &[usize]) -> Node {
+    if path.is_empty() {
+        return root.clone();
+    }
+    // Walk root -> target, peeling each ancestor's branch toward the next
+    // node into a "stripped" node (itself minus that child, carrying that
+    // edge's length as its own -- it will hang off the inverted chain).
+    let mut cur = root;
+    let mut stripped: Vec<Node> = Vec::new();
+    for &idx in path {
+        let child = &cur.children[idx];
+        let mut remaining = cur.children.clone();
+        remaining.remove(idx);
+        stripped.push(Node {
+            label: cur.label.clone(),
+            branch_length: child.branch_length,
+            children: remaining,
+        });
+        cur = child;
+    }
+    // Fold the stripped ancestors from the root side inward, each becoming
+    // a child of the next one down, producing the single subtree that
+    // used to sit "above" the target.
+    let mut iter = stripped.into_iter();
+    let mut inverted = iter.next().expect("path is non-empty");
+    for mut next in iter {
+        next.children.push(inverted);
+        inverted = next;
+    }
+    let mut new_root = cur.clone();
+    new_root.branch_length = None;
+    new_root.children.push(inverted);
+    new_root
+}
+
 /// Every internal node's descendant leaf set, side-normalized so it never
 /// contains `outgroup` -- a rooting-invariant representation sufficient to
 /// compare two trees' topologies once both are considered "rooted at (or
@@ -370,6 +435,49 @@ mod tests {
             leaves(&renamed),
             BTreeSet::from(["alpha", "beta", "c", "d"].map(String::from))
         );
+    }
+
+    #[test]
+    fn reroot_is_noop_when_leaf_parent_is_already_root() {
+        // root's direct children are [x, y, z]; y's parent is already the
+        // root, so rerooting on y changes nothing.
+        let tree = parse("(x,y,z);").unwrap();
+        let rerooted = reroot_at_leaf_parent(&tree, "y").unwrap();
+        assert_eq!(write(&rerooted), "(x,y,z);");
+    }
+
+    #[test]
+    fn reroots_at_leaf_parent_nested() {
+        // ((a,b),c,(d,e)); reroot on "d" -> parent of d is (d,e), which
+        // becomes the new root: it keeps its own children (d, e) and gains
+        // one extra child holding the inverted rest of the tree ((a,b)
+        // and c, formerly siblings of (d,e) under the old root).
+        let tree = parse("((a,b),c,(d,e));").unwrap();
+        let rerooted = reroot_at_leaf_parent(&tree, "d").unwrap();
+        assert_eq!(leaves(&rerooted), leaves(&tree));
+        assert_eq!(rerooted.children.len(), 3);
+        let labels: Vec<Option<&str>> = rerooted
+            .children
+            .iter()
+            .map(|c| c.label.as_deref())
+            .collect();
+        assert!(labels.contains(&Some("d")));
+        assert!(labels.contains(&Some("e")));
+        let remainder = rerooted
+            .children
+            .iter()
+            .find(|c| c.label.is_none())
+            .expect("remainder child");
+        assert_eq!(
+            leaves(remainder),
+            BTreeSet::from(["a", "b", "c"].map(String::from))
+        );
+    }
+
+    #[test]
+    fn reroot_missing_leaf_returns_none() {
+        let tree = parse("(a,b,c);").unwrap();
+        assert!(reroot_at_leaf_parent(&tree, "nope").is_none());
     }
 
     #[test]

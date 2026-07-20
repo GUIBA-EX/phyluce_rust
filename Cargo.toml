@@ -18,6 +18,7 @@ authors = ["phyluce contributors"]
 repository = "https://github.com/GUIBA-EX/phyluce_rust"
 
 [workspace.dependencies]
+ahash = "0.8"
 anyhow = "1"
 thiserror = "1"
 clap = { version = "4", features = ["derive"] }

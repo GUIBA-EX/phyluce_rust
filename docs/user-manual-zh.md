@@ -1188,6 +1188,31 @@ phyluce probe run-multiple-lastzs-sqlite \
 临时 FASTA 分块。各分块可以乱序完成，但会按目标顺序合并；完成的 genome 会
 立即流式生成 `.clean` 文件并由主线程逐行写入 SQLite 事务。
 
+### 8.11 用 probebwa 替代 stampy
+
+[probebwa](https://github.com/GUIBA-EX/probebwa) 是 stampy 算法的 Rust
+复刻，CLI 兼容旧版 `stampy.py`。`easy-stampy` 把教程里手动跑的三条命令
+（建基因组索引、建哈希表、比对）合成一条：
+
+```bash
+phyluce probe easy-stampy \
+  --species tribolium-castaneum \
+  --assembly triCas1 \
+  --genome-files triCas1.fasta \
+  --index-prefix base/triCas1 \
+  --reads reads_1.fq.gz reads_2.fq.gz \
+  --substitution-rate 0.05 \
+  --threads 8 \
+  --output triCas1-mapped.bam \
+  --bam
+```
+
+`--reads` 传一个文件是单端，传两个（mate1 mate2）是双端。`--bam` 时
+`probebwa` 直接写 BAM，不用再手动 `samtools view` 转换。`probebwa` 二进制
+路径通过 `phyluce.conf` 的 `[binaries] probebwa` 配置。`probebwa` 目前只在
+E. coli 规模的真实数据上跟 stampy-old 验证过，尚未在人类等染色体级基因组
+上测试，大基因组场景请先自行验证。
+
 ## 9. Utilities 命令
 
 从 FASTA header 生成 BED：
@@ -1234,6 +1259,19 @@ phyluce utilities merge-multiple-gzip-files \
   --config samples.conf \
   --output merged \
   --section samples
+```
+
+`--trimmed` 时，配置文件里每个样本对应的是已跑过质控修剪的目录（而非原始
+gzip 文件），命令会在每个目录里识别 R1/R2/singleton 文件并分别合并，写到
+`<output>/<name>/split-adapter-quality-trimmed/` 下，方便直接接后续组装
+步骤：
+
+```bash
+phyluce utilities merge-multiple-gzip-files \
+  --config samples.conf \
+  --output merged \
+  --section samples \
+  --trimmed
 ```
 
 合并 NextSeq gzip：
@@ -1300,6 +1338,19 @@ phyluce genetrees rename-tree-leaves \
   --config names.conf \
   --section standard \
   --output renamed.tre
+```
+
+改名后需要以某个 outgroup 叶子重新生根时，加 `--reroot`（值是改名*之后*的
+叶子名）：新根为该叶子的父节点，原根到它之间的祖先链会被逐边反转，语义与
+DendroPy 的 `tree.reroot_at_node` 一致：
+
+```bash
+phyluce genetrees rename-tree-leaves \
+  --input tree.tre \
+  --config names.conf \
+  --section standard \
+  --output renamed.tre \
+  --reroot outgroup_taxon
 ```
 
 tree topology 计数：
@@ -1403,7 +1454,7 @@ phyluce external check --program binaries --binary mafft
 | 命令/功能 | 差异 |
 | --- | --- |
 | `assembly match-contigs-to-barcodes` | 不执行 BOLD 网络查询；本地 LASTZ slicing 请使用 `--no-bold` |
-| `assembly match-contigs-to-probes` | 新增 `--skip-alignment` 和 `--force`，用于 CI 和非交互运行 |
+| `assembly match-contigs-to-probes` | 新增 `--skip-alignment` 和 `--force`，用于 CI 和非交互运行；contig/probe 名称提取命中默认 `--regex`/`[headers]` 时走手写扫描快路径，端到端约 2.7x 提速，自定义正则不受影响（详见仓库根 README「主要改动」） |
 | `align seqcap-align` | 当前使用 MAFFT；原版支持 MAFFT/MUSCLE 选择 |
 | alignment 输入 | 支持 FASTA、NEXUS、PHYLIP（含 relaxed/sequential）、CLUSTAL、EMBOSS 和 Stockholm；各命令的输出格式仍以帮助信息和明确报错为准 |
 | `align randomly-sample-and-concatenate` | 使用 seeded PRNG 思路，避免原版随机行为不可复现 |
@@ -1411,8 +1462,10 @@ phyluce external check --program binaries --binary mafft
 | `probe get-screened-loci-by-proximity` | cluster tie 保留最小 locus id，而非随机选择 |
 | `probe get-tiled-probes` / `get-tiled-probe-from-multiple-inputs` | `--two-probes` tie 处理为确定性 |
 | `probe reconstruct-uce-from-probe` | 默认使用 MAFFT；可通过 `--muscle-binary` 显式使用原版 MUSCLE 3/Clustal 路径 |
+| `probe easy-stampy` | 新命令，用 probebwa 替代教程手动调用的 `stampy.py`；`probebwa` 尚未在人类等染色体级基因组上验证过，大基因组场景请自行验证 |
 | `genetrees generate-multilocus-bootstrap-count` | 使用纯文本 replicate 格式，不使用 Python pickle |
-| `genetrees rename-tree-leaves` | 尚未实现 `--reroot`；部分 genetree 命令仅接受 Newick 输入 |
+| `genetrees rename-tree-leaves` | `--reroot` 已实现（reroot at 指定叶子的父节点，语义同 DendroPy `reroot_at_node`）；部分 genetree 命令仅接受 Newick 输入 |
+| `utilities merge-multiple-gzip-files` | `--trimmed` 已实现，按 `<output>/<name>/split-adapter-quality-trimmed/` 目录结构合并 R1/R2/singleton |
 | `ncbi prep-uce-align-files-for-ncbi` | Rust 版按预期行为实现，不复现现代 Biopython 下原版导入失败 |
 
 ## 15. 故障排查

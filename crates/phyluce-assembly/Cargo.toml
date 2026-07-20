@@ -7,6 +7,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+ahash = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
@@ -15,3 +16,6 @@ phyluce-config = { path = "../phyluce-config" }
 phyluce-external = { path = "../phyluce-external" }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 csv.workspace = true
+
+[dev-dependencies]
+rustc-hash = "2.1"

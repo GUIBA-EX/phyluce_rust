@@ -4,7 +4,7 @@
 //! filtering, and writing `probe.matches.sqlite` + optional CSV/dupe-report
 //! output.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -12,7 +12,7 @@ use anyhow::Context;
 use phyluce_assembly::{
     contig_count, contig_header_regex, contigs_matching_multiple_uces, db, extract_probe_name,
     get_probe_dupes, loci_matching_multiple_contigs, organism_names_from_fasta_paths,
-    process_taxon_lastz_iter,
+    process_taxon_lastz_iter, FastMap, FastSet,
 };
 use phyluce_config::PhyluceConfig;
 use phyluce_external::ExternalCommand;
@@ -61,12 +61,12 @@ pub fn run(
         uces.insert(extract_probe_name(&record.id, &probe_regex)?);
     }
 
-    let dupes: HashSet<String> = match &dupefile {
+    let dupes: FastSet<String> = match &dupefile {
         Some(path) => {
             let matches = read_lastz(path, false)?;
             get_probe_dupes(&matches, &probe_regex)?
         }
-        None => HashSet::new(),
+        None => FastSet::default(),
     };
 
     let mut fasta_files: Vec<PathBuf> = Vec::new();
@@ -170,7 +170,7 @@ pub fn run(
 
         let contigs_matching_mult_uces = contigs_matching_multiple_uces(&result.matches);
         let (uce_dupe_contigs, uce_dupe_uces) = loci_matching_multiple_contigs(&result.revmatches);
-        let mut nodes_to_drop: HashSet<String> = contigs_matching_mult_uces.clone();
+        let mut nodes_to_drop: FastSet<String> = contigs_matching_mult_uces.clone();
         nodes_to_drop.extend(uce_dupe_contigs.iter().cloned());
 
         if let Some(w) = dupe_writer.as_mut() {
@@ -184,7 +184,7 @@ pub fn run(
             )?;
         }
 
-        let filtered: std::collections::HashMap<String, HashSet<String>> = result
+        let filtered: FastMap<String, FastSet<String>> = result
             .matches
             .iter()
             .filter(|(k, _)| !nodes_to_drop.contains(*k))
@@ -273,10 +273,10 @@ fn run_lastz_alignment(
 fn write_dupe_report(
     w: &mut std::fs::File,
     critter: &str,
-    uce_dupe_uces: &HashSet<String>,
-    revmatches: &std::collections::HashMap<String, HashSet<String>>,
-    contigs_matching_mult_uces: &HashSet<String>,
-    matches: &std::collections::HashMap<String, HashSet<String>>,
+    uce_dupe_uces: &FastSet<String>,
+    revmatches: &FastMap<String, FastSet<String>>,
+    contigs_matching_mult_uces: &FastSet<String>,
+    matches: &FastMap<String, FastSet<String>>,
 ) -> std::io::Result<()> {
     if !uce_dupe_uces.is_empty() {
         writeln!(w, "[{critter} - probes hitting multiple contigs]")?;
