@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TwoBitError {
@@ -233,12 +233,26 @@ impl TwoBitFile {
             .source
             .read_at(checked_add(layout.packed_offset, packed_start)?, packed_len)?;
 
-        const BASES: [u8; 4] = *b"TCAG";
+        let table = byte_to_bases_table();
         let mut seq = Vec::with_capacity((end - start) as usize);
-        for position in start..end {
-            let byte = packed[(position / 4 - packed_start) as usize];
-            let shift = 6 - 2 * (position % 4);
-            seq.push(BASES[((byte >> shift) & 0x3) as usize]);
+        // `packed` is byte-granular (rounded out to whole bytes at both
+        // ends), so most of its bytes fall entirely inside [start, end)
+        // and decode to 4 bases each via one table lookup + a 4-byte copy;
+        // only the first and/or last byte can be partially out of range
+        // and needs the per-base bounds check.
+        for (i, &byte) in packed.iter().enumerate() {
+            let byte_start_pos = (packed_start + i as u64) * 4;
+            let bases = &table[byte as usize];
+            if byte_start_pos >= start && byte_start_pos + 4 <= end {
+                seq.extend_from_slice(bases);
+            } else {
+                for (j, &base) in bases.iter().enumerate() {
+                    let pos = byte_start_pos + j as u64;
+                    if pos >= start && pos < end {
+                        seq.push(base);
+                    }
+                }
+            }
         }
 
         let masks = self.read_blocks(
@@ -301,6 +315,29 @@ impl Source {
         }
         Ok(end)
     }
+}
+
+/// `packed[byte]` -> the 4 decoded bases that byte represents, most-
+/// significant bits first (i.e. index 0 is bits 6-7, matching
+/// `shift = 6 - 2*(pos%4)` in the per-base version this replaces). Built
+/// once and cached: 256 entries is cheap to compute but not free, and
+/// `read_slice` can be called many times per genome (once per BED
+/// interval).
+fn byte_to_bases_table() -> &'static [[u8; 4]; 256] {
+    static TABLE: OnceLock<[[u8; 4]; 256]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        const BASES: [u8; 4] = *b"TCAG";
+        let mut table = [[0u8; 4]; 256];
+        for (byte, entry) in table.iter_mut().enumerate() {
+            *entry = [
+                BASES[(byte >> 6) & 0x3],
+                BASES[(byte >> 4) & 0x3],
+                BASES[(byte >> 2) & 0x3],
+                BASES[byte & 0x3],
+            ];
+        }
+        table
+    })
 }
 
 fn read_u32_from(source: &Source, big_endian: bool, offset: u64) -> Result<u32, TwoBitError> {
@@ -380,9 +417,22 @@ mod tests {
         buf
     }
 
-    // Ad hoc benchmark for `read_slice`'s decode loop: is it actually a
-    // bottleneck at chromosome scale, before reaching for SIMD? Run with:
+    // Ad hoc benchmark for `read_slice`'s decode loop. Run with:
     //   cargo +stable test --release -p phyluce-io --lib -- --ignored --nocapture bench_twobit_decode
+    //
+    // First measured at ~1.2 Gbases/sec with a straightforward per-base
+    // loop (divide/shift/mask + table lookup, once per base), and SIMD
+    // was considered and set aside on the strength of that number alone
+    // (already fast, and `std::simd` is nightly-only). That reasoning
+    // skipped a step: a plain byte-at-a-time lookup table (`packed[byte]`
+    // -> its 4 decoded bases, see `byte_to_bases_table`) removes the
+    // redundant per-base division and re-indexing the same byte 4x, with
+    // no SIMD/unsafe/nightly involved -- and got this to ~3.3-3.6
+    // Gbases/sec, ~3x faster than the number SIMD was being compared
+    // against. Left as-is now: this is well past what any of this
+    // project's commands need (decoding a whole human chromosome, ~250M
+    // bases, takes well under a second), and further SIMD gains on top of
+    // an already-memcpy-shaped loop are unlikely to be worth chasing.
     fn build_large_fixture(n_bases: usize) -> Vec<u8> {
         let name = b"chr1";
         // Deterministic pseudo-random 2-bit codes packed 4/byte, no N or
@@ -425,6 +475,56 @@ mod tests {
         buf.extend_from_slice(&0u32.to_le_bytes()); // reserved
         buf.extend_from_slice(&packed);
         buf
+    }
+
+    // The byte-at-a-time table lookup in `read_slice` replaced a simple
+    // per-base loop; check it against an *independent* reference that
+    // replicates `build_large_fixture`'s own PRNG-to-code sequence
+    // directly (not by calling any of this module's decode functions,
+    // which would just be testing the table path against itself) across
+    // many random [start, end) windows, including ones that start and/or
+    // end mid-byte -- exactly the boundary case the table version
+    // special-cases.
+    #[test]
+    fn table_decode_matches_naive_per_base_decode_across_random_windows() {
+        const BASES: [u8; 4] = *b"TCAG";
+        let n_bases = 5_003usize; // not a multiple of 4, so the last byte is partial
+        let tb = TwoBitFile::from_bytes(build_large_fixture(n_bases)).unwrap();
+
+        // Independently reproduce the exact base sequence
+        // `build_large_fixture` packed, using the same PRNG seed/update
+        // it uses, without going through any `TwoBitFile` decode path.
+        let mut state: u64 = 0x243F6A8885A308D3;
+        let mut expected_full = Vec::with_capacity(n_bases);
+        for _ in 0..n_bases {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let code = (state & 0x3) as usize;
+            expected_full.push(BASES[code]);
+        }
+
+        let mut rng_state: u64 = 0xDEADBEEFCAFEF00D;
+        let mut next = || {
+            rng_state ^= rng_state << 13;
+            rng_state ^= rng_state >> 7;
+            rng_state ^= rng_state << 17;
+            rng_state
+        };
+
+        for _ in 0..500 {
+            let a = (next() as usize) % (n_bases + 1);
+            let b = (next() as usize) % (n_bases + 1);
+            let (start, end) = if a <= b { (a, b) } else { (b, a) };
+
+            let got = tb.read_slice("chr1", start as i64, end as i64).unwrap();
+            let expected = &expected_full[start..end];
+
+            assert_eq!(
+                got, expected,
+                "start={start} end={end}: table-decoded slice != independent reference"
+            );
+        }
     }
 
     #[test]

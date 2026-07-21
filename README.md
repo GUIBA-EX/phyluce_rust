@@ -81,6 +81,7 @@ phyluce align convert-degen-bases --alignments in --output out
 | 并发任务调度 | `rayon` | ~1.8x–4.4x |
 | FASTA 解析 | 消除序列行的重复扫描（原来每行最多扫 3 遍） | ~1.3x |
 | FASTQ 长度/计数 | 逐行 `BufRead::lines()`（每行分配 `String` + UTF-8 校验）→ 字节级 `read_until` 读入复用缓冲区，只在真正需要时才转 UTF-8 | 长度提取 ~1.2x，纯计数 ~3.3x |
+| 2bit 解码 | 逐 base 除法+移位+查表 → 逐字节查 256 项表（一次查表拿到 4 个 base，`extend_from_slice` 写入） | ~2.8x–3x（~1.2 → ~3.3-3.6 Gbases/sec） |
 | 编译配置 | `[profile.release]` 开启 LTO + `codegen-units=1` | - |
 | 内存分配器 | `phyluce-cli` 换用 `mimalloc` | - |
 
@@ -88,8 +89,12 @@ phyluce align convert-degen-bases --alignments in --output out
 
 - `ahash` 替代标准库 SipHash：已实测，收益边际，仅在已经因为改用哈希表而
   受益的地方顺手用上，没有为此单独改动。
-- SIMD 解码 2bit：twobit 解码本身已经 ~1.2 Gbases/sec，不是瓶颈；而且
-  `std::simd` 仍是 nightly-only 特性，跟本项目坚持只用 stable Rust 冲突。
+- SIMD 解码 2bit：最初只测了朴素的逐 base 循环（~1.2 Gbases/sec），据此认为
+  "已经够快+`std::simd` 是 nightly-only"就没再深入——这个结论下得太早，见上表，
+  一个不需要 SIMD/unsafe/nightly 的查表方案就有 ~3x 提升，反而佐证了"先把
+  简单方案的账算清楚，再谈需不需要 SIMD"。查表方案封顶后（~3.5 Gbases/sec，
+  解码一整条人类染色体不到一秒）已经远超本项目实际需求，SIMD 在这基础上还能
+  再快多少没有验证，暂不追加。
 - `mmap` 读取 2bit 文件：实测评估后判断收益不足以抵消复杂度。
 - 引入 [rust-bio](https://github.com/rust-bio/rust-bio)（crates.io 上的
   `bio`）替代自己的 FASTA/FASTQ reader：单独测过，它确实更快（同一份数据
