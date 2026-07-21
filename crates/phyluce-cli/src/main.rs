@@ -413,6 +413,12 @@ enum ProbeAction {
         /// Override the default MAFFT executable.
         #[arg(long)]
         mafft_binary: Option<String>,
+        /// Additionally write one unwrapped, single-record FASTA file per
+        /// locus (`<locus>.fasta`) into this directory -- not in the
+        /// Python original; matches the reference-directory layout
+        /// GeneMiner2-UCE's `-r` flag expects.
+        #[arg(long)]
+        per_locus_dir: Option<PathBuf>,
     },
     /// Equivalent to `phyluce_probe_get_genome_sequences_from_bed`. Reads
     /// genomes from UCSC `.2bit` files via a hand-rolled parser (see
@@ -2027,11 +2033,13 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
             output,
             muscle_binary,
             mafft_binary,
+            per_locus_dir,
         } => reconstruct_uce_from_probe_cmd::run(
             &input,
             &output,
             muscle_binary.as_deref(),
             mafft_binary.as_deref(),
+            per_locus_dir.as_deref(),
         ),
         ProbeAction::GetGenomeSequencesFromBed {
             bed,

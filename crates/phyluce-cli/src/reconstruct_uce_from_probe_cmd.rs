@@ -4,6 +4,13 @@
 //! Multi-probe loci use MAFFT by default and retain the Python original's
 //! Biopython `dumb_consensus()` semantics. MUSCLE 3 `-clwstrict` remains
 //! available as an explicit legacy compatibility path.
+//!
+//! `--per-locus-dir` is an addition beyond the Python original: alongside
+//! the usual single combined `--output` FASTA, it also writes one
+//! unwrapped, single-record FASTA file per locus (`<locus>.fasta`) into
+//! the given directory -- the reference-directory layout GeneMiner2-UCE's
+//! `-r` flag expects (one file per UCE, p1/p2/... overlap already merged
+//! into a single sequence by the same consensus step used for `--output`).
 
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -109,11 +116,13 @@ fn parse_clustal(text: &str) -> anyhow::Result<Vec<Vec<u8>>> {
     Ok(aligned)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     input: &Path,
     output: &Path,
     muscle_bin: Option<&str>,
     mafft_bin: Option<&str>,
+    per_locus_dir: Option<&Path>,
 ) -> anyhow::Result<()> {
     let records = phyluce_io::read_fasta(input)
         .with_context(|| format!("reading input FASTA {}", input.display()))?;
@@ -140,10 +149,14 @@ pub fn run(
 
     let mut out = std::fs::File::create(output)
         .with_context(|| format!("creating output file {}", output.display()))?;
+    if let Some(dir) = per_locus_dir {
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("creating per-locus output directory {}", dir.display()))?;
+    }
     let mut count = 0usize;
     for locus in &buckets {
         let recs = &d[locus];
-        if recs.len() > 1 {
+        let sequence = if recs.len() > 1 {
             let seqs = if let Some(muscle_bin) = muscle_bin {
                 run_muscle(muscle_bin, recs)?
             } else {
@@ -163,10 +176,18 @@ pub fn run(
                 let alignment = phyluce_align::mafft::run_mafft(mafft_bin, &inputs)?;
                 alignment.rows.into_iter().map(|row| row.seq).collect()
             };
-            let consensus = dumb_consensus(&seqs);
-            writeln!(out, ">{locus}\n{}", String::from_utf8_lossy(&consensus))?;
+            String::from_utf8_lossy(&dumb_consensus(&seqs)).into_owned()
         } else {
-            writeln!(out, ">{locus}\n{}", recs[0].sequence)?;
+            recs[0].sequence.clone()
+        };
+        writeln!(out, ">{locus}\n{sequence}")?;
+        if let Some(dir) = per_locus_dir {
+            // One unwrapped, single-record FASTA per locus, named to match
+            // GeneMiner2-UCE's `-r` reference-directory convention
+            // (`<locus>.fasta`, e.g. `uce-0.fasta`).
+            let locus_path = dir.join(format!("{locus}.fasta"));
+            std::fs::write(&locus_path, format!(">{locus}\n{sequence}\n"))
+                .with_context(|| format!("writing per-locus FASTA {}", locus_path.display()))?;
         }
         count += 1;
     }
@@ -175,12 +196,46 @@ pub fn run(
         "Wrote {count} loci to {}",
         output.file_name().and_then(|s| s.to_str()).unwrap_or("")
     );
+    if let Some(dir) = per_locus_dir {
+        crate::cli_warn!("Wrote {count} per-locus FASTA files to {}", dir.display());
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn per_locus_dir_writes_one_unwrapped_file_per_locus() {
+        // Single-probe loci only, so this doesn't need a real MAFFT/MUSCLE
+        // binary on PATH -- exercises the per-locus-dir plumbing (dir
+        // creation, one file per locus, unwrapped single-line content,
+        // `<locus>.fasta` naming) independent of the consensus step.
+        let dir = std::env::temp_dir().join(format!(
+            "phyluce-reconstruct-per-locus-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("probes.fasta");
+        std::fs::write(
+            &input,
+            ">uce-1_p1 |design:test\nACGTACGT\n>uce-2_p1 |design:test\nTTTTGGGG\n",
+        )
+        .unwrap();
+        let output = dir.join("combined.fasta");
+        let per_locus_dir = dir.join("per_locus");
+
+        run(&input, &output, None, None, Some(&per_locus_dir)).unwrap();
+
+        let uce1 = std::fs::read_to_string(per_locus_dir.join("uce-1.fasta")).unwrap();
+        assert_eq!(uce1, ">uce-1\nACGTACGT\n");
+        let uce2 = std::fs::read_to_string(per_locus_dir.join("uce-2.fasta")).unwrap();
+        assert_eq!(uce2, ">uce-2\nTTTTGGGG\n");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn consensus_matches_biopython_gap_and_threshold_rules() {

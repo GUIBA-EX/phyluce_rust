@@ -43,6 +43,10 @@ phyluce_workflow
   corresponding paths in `phyluce.conf`.
 - `reconstruct-uce-from-probe` uses MAFFT by default for multi-probe loci;
   `--muscle-binary` explicitly selects the legacy MUSCLE 3/Clustal path.
+  `--per-locus-dir DIR` is an addition beyond the Python original: alongside
+  the usual combined `--output` FASTA, also writes one unwrapped,
+  single-record FASTA file per locus (`<locus>.fasta`) into `DIR` -- the
+  reference-directory layout GeneMiner2-UCE's `-r` flag expects.
 - `prep-uce-align-files-for-ncbi` (`phyluce_ncbi_prep_uce_align_files_for_ncbi`)
   crashes on import against modern Biopython (`from Bio.Alphabet import IUPAC`
   -- `Bio.Alphabet` was removed). This port matches its intended behavior
