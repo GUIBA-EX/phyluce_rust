@@ -360,7 +360,49 @@ fn reroot_at_path(root: &Node, path: &[usize]) -> Node {
     let mut new_root = cur.clone();
     new_root.branch_length = None;
     new_root.children.push(inverted);
-    new_root
+    // Any ancestor that had exactly 2 children before stripping (by far
+    // the common case for real gene trees, e.g. RAxML output) leaves a
+    // degree-1 "unifurcation" behind once its one remaining sibling has
+    // nowhere else to attach -- concretely, the *first* stripped entry
+    // (the old root's own remnant), which is only ever a fold *source*
+    // above, never a fold *target*, so nothing ever adds a second child to
+    // it. A childless-of-siblings node like that carries no bipartition of
+    // its own, so leaving it in doesn't just look odd in the output
+    // Newick -- `bipartitions_polarized_by` (correctly) ignores it,
+    // permanently losing whatever split its one child represented alone.
+    // Splicing out every unifurcation in the finished tree (not just that
+    // one spot -- nesting can produce more of them) is the standard fix
+    // ("suppress unifurcations", same as DendroPy/ete3): see
+    // `suppress_unifurcations` below.
+    suppress_unifurcations(new_root)
+}
+
+/// Recursively replace any node with exactly one child by that child
+/// directly, summing branch lengths across the spliced-out edge. A node's
+/// own label (e.g. a bootstrap support value) has nowhere sensible to go
+/// once the node it labeled is gone, so it's dropped. Idempotent: a tree
+/// with no unifurcations is returned unchanged (module the recursive
+/// rebuild).
+fn suppress_unifurcations(node: Node) -> Node {
+    let children: Vec<Node> = node
+        .children
+        .into_iter()
+        .map(suppress_unifurcations)
+        .collect();
+    if children.len() == 1 {
+        let mut only = children.into_iter().next().expect("len == 1");
+        only.branch_length = match (only.branch_length, node.branch_length) {
+            (Some(a), Some(b)) => Some(a + b),
+            (a, b) => a.or(b),
+        };
+        only
+    } else {
+        Node {
+            label: node.label,
+            branch_length: node.branch_length,
+            children,
+        }
+    }
 }
 
 /// Every internal node's descendant leaf set, side-normalized so it never
@@ -472,6 +514,130 @@ mod tests {
             leaves(remainder),
             BTreeSet::from(["a", "b", "c"].map(String::from))
         );
+    }
+
+    // --- Property/differential tests for reroot_at_leaf_parent ----------
+    //
+    // The example tests above only cover "leaf's parent is already root"
+    // and one two-level-nested case. Reroot logic is exactly the kind of
+    // recursive tree surgery that tends to have bugs only visible on
+    // deeper/asymmetric topologies -- the same reasoning that motivated
+    // fast_extract's differential fuzz tests elsewhere in this codebase.
+    // There's no independent reference implementation to diff against
+    // here, so instead this checks two invariants that must hold for any
+    // *correct* reroot, using `bipartitions_polarized_by` (already used
+    // elsewhere to compare tree topologies regardless of rooting) as the
+    // oracle:
+    //   1. the leaf set is unchanged (reroot never gains/loses taxa).
+    //   2. the tree's topology, polarized by the rerooted-on leaf as
+    //      outgroup, is bit-for-bit identical before and after -- rerooting
+    //      changes *representation*, not the tree relationships it encodes.
+
+    struct Xorshift64(u64);
+    impl Xorshift64 {
+        fn new(seed: u64) -> Self {
+            Xorshift64(seed | 1)
+        }
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn range(&mut self, n: usize) -> usize {
+            (self.next_u64() % n as u64) as usize
+        }
+    }
+
+    /// A random rooted tree over `next_leaf_id..next_leaf_id+n_leaves`
+    /// (leaf labels `"L{id}"`), with a random (possibly deep, possibly
+    /// wide) shape: each internal node gets 2-3 children, recursively,
+    /// until `n_leaves` is used up.
+    fn random_tree(rng: &mut Xorshift64, n_leaves: usize, next_leaf_id: &mut usize) -> Node {
+        if n_leaves <= 1 {
+            let id = *next_leaf_id;
+            *next_leaf_id += 1;
+            return Node {
+                label: Some(format!("L{id}")),
+                branch_length: Some(1.0),
+                children: Vec::new(),
+            };
+        }
+        // 2 or 3 children, but never more than there are leaves to give
+        // them (each child needs >=1).
+        let n_children = (2 + rng.range(2)).min(n_leaves);
+        let mut remaining = n_leaves;
+        let mut children = Vec::new();
+        for i in 0..n_children {
+            let slots_left = n_children - i;
+            let take = if slots_left == 1 {
+                remaining
+            } else {
+                // Leave >=1 leaf for each remaining child after this one.
+                let max_take = remaining - (slots_left - 1);
+                1 + rng.range(max_take)
+            };
+            children.push(random_tree(rng, take, next_leaf_id));
+            remaining -= take;
+        }
+        Node {
+            label: (rng.range(2) == 0).then(|| format!("{}", rng.range(100))), // bootstrap-ish
+            branch_length: Some(1.0),
+            children,
+        }
+    }
+
+    #[test]
+    fn reroot_preserves_leaves_and_topology_across_random_trees() {
+        for seed in [1u64, 2, 42, 0xC0FFEE, 0xDEADBEEF, 7, 99, 0x5EED] {
+            let mut rng = Xorshift64::new(seed);
+            for n_leaves in [3usize, 5, 8, 12, 20] {
+                let mut next_leaf_id = 0;
+                let tree = random_tree(&mut rng, n_leaves, &mut next_leaf_id);
+                let all_leaves = leaves(&tree);
+                assert_eq!(all_leaves.len(), n_leaves);
+
+                // Reroot at a random leaf each time (round-robin over all
+                // leaves across iterations for broader coverage).
+                let outgroup = all_leaves.iter().nth(rng.range(n_leaves)).unwrap();
+                let rerooted = reroot_at_leaf_parent(&tree, outgroup).unwrap_or_else(|| {
+                    panic!("seed={seed} n_leaves={n_leaves} outgroup={outgroup}: no leaf found")
+                });
+
+                assert_eq!(
+                    leaves(&rerooted),
+                    all_leaves,
+                    "seed={seed} n_leaves={n_leaves} outgroup={outgroup}: leaf set changed"
+                );
+                // `bipartitions_polarized_by` filters trivial splits by the
+                // *pre-normalization* side's size, so a split that's
+                // genuinely "N-1 leaves vs. 1 leaf" can still show up
+                // normalized down to a single-element set -- that's just
+                // one leaf's own pendant/terminal edge (true of literally
+                // every leaf in every tree), not real topological
+                // information, and standard phylogenetic tree comparisons
+                // (e.g. Robinson-Foulds) exclude pendant edges the same
+                // way. Filter those out here rather than changing
+                // `bipartitions_polarized_by` itself, which other code
+                // (`tree_counts_cmd`) already depends on as-is.
+                let non_trivial = |bp: BTreeSet<Vec<String>>| -> BTreeSet<Vec<String>> {
+                    bp.into_iter().filter(|side| side.len() > 1).collect()
+                };
+                assert_eq!(
+                    non_trivial(bipartitions_polarized_by(&tree, outgroup)),
+                    non_trivial(bipartitions_polarized_by(&rerooted, outgroup)),
+                    "seed={seed} n_leaves={n_leaves} outgroup={outgroup}: topology changed"
+                );
+
+                // Rerooting is idempotent: rerooting an already-rerooted
+                // tree at the same outgroup should be a no-op (the
+                // outgroup's parent is now the root already).
+                let rerooted_again = reroot_at_leaf_parent(&rerooted, outgroup).unwrap();
+                assert_eq!(write(&rerooted_again), write(&rerooted));
+            }
+        }
     }
 
     #[test]

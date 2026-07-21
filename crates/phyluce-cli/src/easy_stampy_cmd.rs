@@ -5,6 +5,14 @@
 //! don't have to script the three-step pipeline (or a trailing `samtools
 //! view` for BAM output -- `probebwa map --outputformat=bam` writes it
 //! directly).
+//!
+//! The whole reason the original workflow is three separate commands is so
+//! `build-genome`/`build-hash` run once and `map` runs many times against
+//! the same index (batch-mapping many samples to one reference). If this
+//! wrapper unconditionally rebuilt the index on every call, that reuse
+//! would be lost -- expensive for chromosome-scale genomes, and wasteful
+//! when nothing changed. So: skip a build step whose output file already
+//! exists, unless `--force-rebuild-index` says otherwise.
 
 use std::path::Path;
 
@@ -24,6 +32,7 @@ pub fn run(
     threads: usize,
     output: &Path,
     bam: bool,
+    force_rebuild_index: bool,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         !reads.is_empty() && reads.len() <= 2,
@@ -36,18 +45,35 @@ pub fn run(
     let index_prefix = index_prefix.to_string_lossy().into_owned();
     let output = output.to_string_lossy().into_owned();
 
-    ExternalCommand::new(&probebwa_bin)
-        .args(build_genome_args(
-            species,
-            assembly,
-            &index_prefix,
-            genome_files,
-        ))
-        .run()?;
+    // probebwa's own naming convention: `build-genome -G PREFIX` writes
+    // `PREFIX.stidx`, `build-hash -H PREFIX` writes `PREFIX.sthash`.
+    let stidx_path = format!("{index_prefix}.stidx");
+    let sthash_path = format!("{index_prefix}.sthash");
+    let stidx_exists = Path::new(&stidx_path).is_file();
+    let sthash_exists = Path::new(&sthash_path).is_file();
 
-    ExternalCommand::new(&probebwa_bin)
-        .args(build_hash_args(&index_prefix, &index_prefix))
-        .run()?;
+    if force_rebuild_index || !stidx_exists {
+        ExternalCommand::new(&probebwa_bin)
+            .args(build_genome_args(
+                species,
+                assembly,
+                &index_prefix,
+                genome_files,
+            ))
+            .run()?;
+    } else {
+        crate::cli_info!("Reusing existing genome index {stidx_path}");
+    }
+
+    // A rebuilt genome index invalidates any existing hash table, even if
+    // the hash file itself is still on disk from a previous run.
+    if force_rebuild_index || !stidx_exists || !sthash_exists {
+        ExternalCommand::new(&probebwa_bin)
+            .args(build_hash_args(&index_prefix, &index_prefix))
+            .run()?;
+    } else {
+        crate::cli_info!("Reusing existing hash table {sthash_path}");
+    }
 
     ExternalCommand::new(&probebwa_bin)
         .args(map_args(

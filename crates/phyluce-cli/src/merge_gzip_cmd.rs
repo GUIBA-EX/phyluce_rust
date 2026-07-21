@@ -66,9 +66,11 @@ pub fn run(config: &Path, output: &Path, section: &str, trimmed: bool) -> anyhow
             (&r2_files, "READ2"),
             (&singleton_files, "READ-singleton"),
         ] {
-            if files.is_empty() {
-                continue;
-            }
+            // Always create the output file, even with zero inputs
+            // (matching the Python original, which unconditionally opens
+            // it before the inner loop): some samples legitimately have no
+            // singleton reads, and downstream tooling may expect all three
+            // R1/R2/singleton files to exist regardless.
             let mut sorted_files = files.clone();
             sorted_files.sort();
             let new_name = format!("{name}-{read_kind}.fastq.gz");

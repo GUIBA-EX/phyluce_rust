@@ -492,8 +492,12 @@ enum ProbeAction {
     /// mapper, in place of `stampy.py`. Chains `probebwa build-genome`,
     /// `build-hash`, and `map` in sequence; pass `--bam` to write BAM
     /// directly instead of piping SAM through `samtools view` by hand.
-    /// Untested: `probebwa` isn't installed in this environment -- see
-    /// `probebwa_align` docs.
+    /// A `build-genome`/`build-hash` step is skipped when its output file
+    /// (`<index-prefix>.stidx`/`.sthash`) already exists, so mapping many
+    /// samples against the same reference only pays the indexing cost
+    /// once; pass `--force-rebuild-index` to rebuild anyway (e.g. after
+    /// changing `--genome-files`). Untested: `probebwa` isn't installed in
+    /// this environment -- see `probebwa_align` docs.
     EasyStampy {
         #[arg(long)]
         species: String,
@@ -515,6 +519,9 @@ enum ProbeAction {
         output: PathBuf,
         #[arg(long, default_value_t = false)]
         bam: bool,
+        /// Rebuild `.stidx`/`.sthash` even if they already exist.
+        #[arg(long, default_value_t = false)]
+        force_rebuild_index: bool,
     },
     /// Equivalent to `phyluce_probe_run_multiple_lastzs_sqlite`. Splits
     /// chromosome targets by sequence and scaffold targets into roughly
@@ -2110,6 +2117,7 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
             threads,
             output,
             bam,
+            force_rebuild_index,
         } => easy_stampy_cmd::run(
             &species,
             &assembly,
@@ -2120,6 +2128,7 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
             threads,
             &output,
             bam,
+            force_rebuild_index,
         ),
         ProbeAction::RunMultipleLastzsSqlite {
             db,
