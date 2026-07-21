@@ -168,6 +168,15 @@ pub fn run(
             dupefile.is_some(),
         )?;
 
+        if result.header_fallback_count > 0 {
+            crate::cli_warn!(
+                "{critter}: {} contig header(s) didn't match any [headers] pattern in \
+                 phyluce.conf; used the header's first token as the contig name instead. \
+                 Add a custom [headers] pattern if this looks wrong.",
+                result.header_fallback_count
+            );
+        }
+
         let contigs_matching_mult_uces = contigs_matching_multiple_uces(&result.matches);
         let (uce_dupe_contigs, uce_dupe_uces) = loci_matching_multiple_contigs(&result.revmatches);
         let mut nodes_to_drop: FastSet<String> = contigs_matching_mult_uces.clone();

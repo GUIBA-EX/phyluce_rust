@@ -78,6 +78,15 @@ phyluce_workflow
   packaged defaults; any customization keeps using the regex engine
   unchanged, and the fast path always falls back to it on a non-match rather
   than reporting one independently.
+- `phyluce.conf`'s `[headers]` contig-naming patterns cover Trinity, Velvet,
+  ABySS, IDBA, and SPAdes (matching the Python original) plus MEGAHIT
+  (`k\d+_\d+`) and Flye (`contig_\d+`), which the original doesn't
+  recognize. A contig header matching none of these patterns -- an
+  assembler not on this list, or manually renamed contigs -- no longer
+  aborts `match-contigs-to-probes`/`get-fastas-from-match-counts`: it falls
+  back to the header's first whitespace-delimited token as the contig name
+  and prints one aggregated warning per taxon (not per contig). Add a
+  custom `[headers]` pattern if the fallback's guess is wrong for your data.
 
 ## Logging
 

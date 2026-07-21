@@ -10,7 +10,7 @@ use phyluce_assembly::get_fastas::{
     reverse_complement,
 };
 use phyluce_assembly::match_counts::read_taxon_list_config;
-use phyluce_assembly::{contig_header_regex, extract_contig_name};
+use phyluce_assembly::{contig_header_regex, extract_contig_name_lenient};
 use phyluce_config::PhyluceConfig;
 use phyluce_io::{read_fasta, write_fasta_record};
 use rusqlite::Connection;
@@ -108,13 +108,19 @@ pub fn run(
         let mut nodes_written: HashSet<String> = HashSet::new();
         let mut written: Vec<String> = Vec::new();
         let mut n_replace_count = 0usize;
+        let mut header_fallback_count = 0usize;
 
         let records = read_fasta(&reads)?;
         for record in &records {
             if nodes_written.len() == node_dict_set.len() {
                 break;
             }
-            let contig_name = extract_contig_name(&record.id, &header_regex)?.to_lowercase();
+            let (contig_name, used_fallback) =
+                extract_contig_name_lenient(&record.id, &header_regex)?;
+            let contig_name = contig_name.to_lowercase();
+            if used_fallback {
+                header_fallback_count += 1;
+            }
             if let Some(node) = node_dict.get(&contig_name) {
                 let organism_stripped = organism.trim_end_matches('*');
                 let new_id = format!("{}_{} |{}", node.uce, organism_stripped, node.uce);
@@ -134,6 +140,13 @@ pub fn run(
         if n_replace_count > 0 {
             crate::cli_info!(
                 "Replaced <20 ambiguous bases (N) in {n_replace_count} contigs for {organism}"
+            );
+        }
+        if header_fallback_count > 0 {
+            crate::cli_warn!(
+                "{organism}: {header_fallback_count} contig header(s) didn't match any \
+                 [headers] pattern in phyluce.conf; used the header's first token as the \
+                 contig name instead. Add a custom [headers] pattern if this looks wrong."
             );
         }
 

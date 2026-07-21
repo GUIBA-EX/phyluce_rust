@@ -210,6 +210,20 @@ mod fast_extract {
         eat_digits(b, p)
     }
 
+    fn m_megahit(b: &[u8]) -> Option<usize> {
+        // k\d+_\d+  (e.g. k141_12345)
+        let p = eat_ci_literal(b, 0, "k")?;
+        let p = eat_digits(b, p)?;
+        let p = eat_ci_literal(b, p, "_")?;
+        eat_digits(b, p)
+    }
+
+    fn m_flye(b: &[u8]) -> Option<usize> {
+        // contig_\d+
+        let p = eat_ci_literal(b, 0, "contig_")?;
+        eat_digits(b, p)
+    }
+
     pub fn contig_name(header: &str) -> Option<&str> {
         let b = header.as_bytes();
         let end = m_trinity_comp(b)
@@ -218,7 +232,9 @@ mod fast_extract {
             .or_else(|| m_trinity_dn(b))
             .or_else(|| m_node(b))
             .or_else(|| m_idba(b))
-            .or_else(|| m_spades(b))?;
+            .or_else(|| m_spades(b))
+            .or_else(|| m_megahit(b))
+            .or_else(|| m_flye(b))?;
         Some(&header[..end])
     }
 }
@@ -284,6 +300,39 @@ pub fn extract_contig_name(header: &str, header_regex: &Regex) -> Result<String,
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_string())
         .ok_or_else(|| MatchError::NoContigNameMatch(header.to_string()))
+}
+
+/// [`extract_contig_name`], but falls back to the header's first
+/// whitespace-delimited token (the de facto sequence ID convention every
+/// FASTA-consuming tool already relies on) instead of erroring when no
+/// `[headers]` pattern matches.
+///
+/// The `[headers]` patterns are a fixed allowlist of assembler-specific
+/// naming conventions; a header from an assembler not on that list (or a
+/// user-renamed contig) would otherwise make `extract_contig_name` fail on
+/// the very first such contig, aborting the whole run via `?` at every
+/// caller. Since this function only needs *a* stable, unique-enough
+/// identifier per contig -- not to actually parse out assembler-specific
+/// metadata -- falling back to "whatever the header calls itself" is a
+/// strictly more permissive superset of the configured patterns, not a
+/// different naming scheme: every configured pattern's match is also that
+/// header's first token, so this changes behavior only for headers that
+/// would otherwise hard-fail.
+///
+/// Returns `(name, used_fallback)` so callers can warn (once, aggregated --
+/// not per contig, which could otherwise be thousands of lines) rather than
+/// silently changing behavior with no visible trace.
+pub fn extract_contig_name_lenient(
+    header: &str,
+    header_regex: &Regex,
+) -> Result<(String, bool), MatchError> {
+    if let Ok(name) = extract_contig_name(header, header_regex) {
+        return Ok((name, false));
+    }
+    match header.split_whitespace().next() {
+        Some(token) if !token.is_empty() => Ok((token.to_string(), true)),
+        _ => Err(MatchError::NoContigNameMatch(header.to_string())),
+    }
 }
 
 /// Build the case-insensitive, anchored contig-header regex from the
@@ -367,6 +416,9 @@ pub struct TaxonMatches {
     pub revmatches: FastMap<String, FastSet<String>>,
     /// UCE loci excluded because they're flagged as probe duplicates
     pub probe_dupes: FastSet<String>,
+    /// Number of contig headers that didn't match any `[headers]` pattern
+    /// and fell back to `extract_contig_name_lenient`'s first-token rule.
+    pub header_fallback_count: usize,
 }
 
 /// Mirrors the `main()` per-taxon LASTZ-result loop: classify each match by
@@ -427,7 +479,10 @@ fn add_taxon_lastz_match(
     dupes: &FastSet<String>,
     dupefile_active: bool,
 ) -> Result<(), MatchError> {
-    let contig_name = extract_contig_name(&m.name1, header_regex)?;
+    let (contig_name, used_fallback) = extract_contig_name_lenient(&m.name1, header_regex)?;
+    if used_fallback {
+        result.header_fallback_count += 1;
+    }
     let uce_name = extract_probe_name(&m.name2, probe_regex)?;
     if dupefile_active && dupes.contains(&uce_name) {
         result.probe_dupes.insert(uce_name);
@@ -663,6 +718,8 @@ mod tests {
                 format!("node_{}", ds[0]),
                 format!("contig-{}_{}", ds[0], ds[1]),
                 format!("NODE_{}_length_{}_cov_{}.{}", ds[0], ds[1], ds[2], ds[3]),
+                format!("k{}_{}", ds[0], ds[1]),
+                format!("contig_{}", ds[0]),
             ];
             for v in variants {
                 let v = rng.mutate_case(&v);
@@ -815,6 +872,44 @@ mod tests {
             extract_contig_name("NODE_1_length_500_cov_10", &re).unwrap(),
             "NODE_1"
         );
+    }
+
+    #[test]
+    fn recognizes_megahit_and_flye_headers() {
+        // `default_header_regex_source()` is already the fully-built,
+        // anchored `(?i)^(...).*` source (i.e. `Regex::as_str()` output),
+        // not raw `|`-joined fragments -- build straight from it rather
+        // than passing it through `contig_header_regex` again.
+        let re = Regex::new(fast_extract::default_header_regex_source()).unwrap();
+        assert_eq!(
+            extract_contig_name("k141_12345 flag=1 multi=8.0000 len=200", &re).unwrap(),
+            "k141_12345"
+        );
+        assert_eq!(
+            extract_contig_name("contig_7 extra stuff", &re).unwrap(),
+            "contig_7"
+        );
+    }
+
+    #[test]
+    fn lenient_extraction_falls_back_to_first_token_for_unrecognized_headers() {
+        let re = contig_header_regex(r"node_\d+").unwrap();
+        let (name, used_fallback) =
+            extract_contig_name_lenient("ptg000001l some_other_assembler_output", &re).unwrap();
+        assert_eq!(name, "ptg000001l");
+        assert!(used_fallback);
+
+        // A recognized pattern never takes the fallback path.
+        let (name, used_fallback) = extract_contig_name_lenient("node_5 stuff", &re).unwrap();
+        assert_eq!(name, "node_5");
+        assert!(!used_fallback);
+    }
+
+    #[test]
+    fn lenient_extraction_still_errors_on_an_empty_header() {
+        let re = contig_header_regex(r"node_\d+").unwrap();
+        assert!(extract_contig_name_lenient("", &re).is_err());
+        assert!(extract_contig_name_lenient("   ", &re).is_err());
     }
 
     #[test]
