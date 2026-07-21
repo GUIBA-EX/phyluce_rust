@@ -78,7 +78,7 @@ phyluce align convert-degen-bases --alignments in --output out
 | contig/probe 名称匹配（默认 `--regex`） | 手写扫描替代通用正则引擎（`fast_extract`），配差分模糊测试防止跟正则语义跑偏 | ~2.7x |
 | `concatenate` 等命令的 taxon 匹配 | O(n²) 线性扫描 → 哈希查找 | 消除随 taxon 数二次方增长（`concatenate` 等 3 处） |
 | 逐行 SQLite INSERT（3 处命令） | 补上显式事务，避免每行触发一次 autocommit | 最多 ~700x |
-| 并发任务调度 | 手撸线程池 → `rayon` | ~1.8x–4.4x |
+| 并发任务调度 | `rayon` | ~1.8x–4.4x |
 | FASTA 解析 | 消除序列行的重复扫描（原来每行最多扫 3 遍） | ~1.3x |
 | FASTQ 长度/计数 | 逐行 `BufRead::lines()`（每行分配 `String` + UTF-8 校验）→ 字节级 `read_until` 读入复用缓冲区，只在真正需要时才转 UTF-8 | 长度提取 ~1.2x，纯计数 ~3.3x |
 | 编译配置 | `[profile.release]` 开启 LTO + `codegen-units=1` | - |
