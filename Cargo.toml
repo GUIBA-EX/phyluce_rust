@@ -17,6 +17,14 @@ license = "BSD-3-Clause"
 authors = ["phyluce contributors"]
 repository = "https://github.com/GUIBA-EX/phyluce_rust"
 
+[profile.release]
+lto = true
+codegen-units = 1
+# panic = "abort" deliberately NOT set: crates/phyluce-cli/src/parallel.rs
+# relies on std::panic::catch_unwind to turn one worker's panic into an
+# Err (instead of aborting the whole batch job), and cargo test's harness
+# needs unwinding to isolate one failing test from the rest of the run.
+
 [workspace.dependencies]
 ahash = "0.8"
 anyhow = "1"

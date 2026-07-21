@@ -5,6 +5,18 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use mimalloc::MiMalloc;
+
+/// Hot paths across this CLI (contig/probe matching, alignment
+/// concatenation, PAML partitioning) do a lot of small, short-lived
+/// `String`/`Vec`/`HashMap`-entry allocations; `mimalloc` is consistently
+/// faster than the system allocator for that pattern (same rationale as
+/// `probebwa`'s `src/main.rs`, which measured this directly). Opting in
+/// only affects this binary, not downstream consumers of the library
+/// crates.
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 use clap::{ArgAction, Parser, Subcommand};
 use phyluce_config::PhyluceConfig;
 use phyluce_external::ExternalCommand;
