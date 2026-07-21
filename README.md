@@ -81,10 +81,6 @@ phyluce align convert-degen-bases --alignments in --output out
 | 2bit 解码 | 逐 base 查表 → 逐字节查 256 项表 | ~3x（~3.5 Gbases/sec） |
 | 编译配置 / 分配器 | LTO + `codegen-units=1`，`mimalloc` | - |
 
-验证过但没有采用：`ahash`（收益边际）、SIMD 解码 2bit（查表方案已够快，见上）、
-`mmap` 读 2bit（收益不抵复杂度）、引入 [rust-bio](https://github.com/rust-bio/rust-bio)
-替代自己的 FASTA/FASTQ reader（确实更快，但带来 83 个传递依赖，不值得）。
-
 ## 快速开始
 
 ```bash
