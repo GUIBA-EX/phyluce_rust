@@ -25,6 +25,16 @@ codegen-units = 1
 # Err (instead of aborting the whole batch job), and cargo test's harness
 # needs unwinding to isolate one failing test from the rest of the run.
 
+# The profile 'dist' (cargo-dist) builds release binaries with. Thin LTO
+# instead of the full LTO [profile.release] uses: dist compiles this
+# across 4 target platforms per release, and full LTO's build-time cost
+# multiplies by platform count in a way local/CI `cargo build --release`
+# never pays; thin LTO keeps most of the runtime benefit for a much
+# shorter build.
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
 [workspace.dependencies]
 ahash = "0.8"
 anyhow = "1"
