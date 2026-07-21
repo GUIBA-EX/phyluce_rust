@@ -1,0 +1,40 @@
+# cargo-deny config. Run with: cargo deny check
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+targets = []
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+# This workspace is GPL-3.0-or-later. Permissive dependency licenses are
+# fine to link against; anything copyleft-incompatible should fail here
+# instead of surfacing as a legal problem later.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSL-1.0",
+    "0BSD",
+    "Unlicense",
+    "Zlib",
+    "Unicode-3.0",
+    "LGPL-2.1-or-later",
+    "GPL-3.0-or-later",
+]
+
+[bans]
+multiple-versions = "warn"
+# "deny" would also flag this workspace's own unversioned path deps between
+# its 7 member crates, which is not a real issue.
+wildcards = "allow"
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

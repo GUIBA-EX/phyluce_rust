@@ -1,0 +1,9 @@
+[toolchain]
+# Pinned to stable: rusqlite's "bundled" feature compiles libsqlite3-sys's
+# vendored C source at build time, and that build script uses cfg_select,
+# which is unstable on nightly (see rust-lang/rust#115585). `cargo` on a
+# nightly-default host will otherwise silently fail here; this file makes
+# `cargo` and `rustup` auto-switch to stable in this repo regardless of the
+# host's default toolchain.
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]

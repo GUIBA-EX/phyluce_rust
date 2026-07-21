@@ -8,7 +8,6 @@ repository.workspace = true
 
 [dependencies]
 ahash = { workspace = true }
-anyhow = { workspace = true }
 thiserror = { workspace = true }
 phyluce-io = { path = "../phyluce-io" }
 phyluce-external = { path = "../phyluce-external" }

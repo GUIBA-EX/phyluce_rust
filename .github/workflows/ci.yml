@@ -31,8 +31,23 @@ jobs:
       - name: cargo build
         run: cargo build --workspace
 
-      - name: cargo test
-        run: cargo test --workspace
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: cargo nextest run
+        run: cargo nextest run --workspace
+
+      - name: cargo test --doc
+        run: cargo test --workspace --doc
 
       - name: Self-contained compatibility fixtures
         run: python3 tests/compat/run_fixtures.py target/debug/phyluce
+
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@cargo-machete
+
+      - name: cargo machete (unused dependencies)
+        run: cargo machete
+
+      - name: cargo-deny (licenses, advisories, bans, sources)
+        uses: EmbarkStudios/cargo-deny-action@v2

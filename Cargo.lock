@@ -411,7 +411,6 @@ name = "phyluce-align"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "anyhow",
  "phyluce-config",
  "phyluce-external",
  "phyluce-io",
@@ -423,10 +422,7 @@ name = "phyluce-assembly"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "anyhow",
- "csv",
  "phyluce-config",
- "phyluce-external",
  "phyluce-io",
  "regex",
  "rusqlite",
@@ -459,7 +455,6 @@ dependencies = [
 name = "phyluce-config"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "thiserror 1.0.69",
 ]
 
@@ -467,7 +462,6 @@ dependencies = [
 name = "phyluce-external"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "thiserror 1.0.69",
 ]
 
@@ -475,7 +469,6 @@ dependencies = [
 name = "phyluce-genetrees"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "thiserror 1.0.69",
 ]
 
@@ -483,7 +476,6 @@ dependencies = [
 name = "phyluce-io"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "flate2",
  "thiserror 1.0.69",
 ]

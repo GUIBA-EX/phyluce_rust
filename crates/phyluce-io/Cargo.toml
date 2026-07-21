@@ -7,6 +7,5 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-anyhow = { workspace = true }
 thiserror = { workspace = true }
 flate2 = { workspace = true }
