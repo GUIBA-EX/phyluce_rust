@@ -48,8 +48,7 @@ phyluce align convert-degen-bases --alignments in --output out
 - `merge-multiple-gzip-files --trimmed` 和 `rename-tree-leaves --reroot`：
   原版这两个选项存在但功能缺失，这个版本补齐了。
 
-性能优化（更快，但不改变任何命令的输出）单开一节，见下方
-[性能优化](#性能优化)。
+性能优化见下面的[性能优化](#性能优化)一节。
 
 ## 目录结构
 
@@ -69,40 +68,22 @@ phyluce align convert-degen-bases --alignments in --output out
 
 ## 性能优化
 
-原则是"先跑 benchmark，能证明有收益再改"——下表只列有实测数字支撑的优化，
-且全部不改变任何命令的输出内容，纯粹是内部实现；细节见提交历史和对应代码里
-的 benchmark 注释。
+原则是"先跑 benchmark，能证明有收益再改"，且不改变任何命令的输出内容。下表
+只列有实测数字支撑的优化，方法细节见对应代码里的 benchmark 注释和提交历史。
 
 | 优化点 | 方法 | 实测提升 |
 | --- | --- | --- |
-| contig/probe 名称匹配（默认 `--regex`） | 手写扫描替代通用正则引擎（`fast_extract`），配差分模糊测试防止跟正则语义跑偏 | ~2.7x |
-| `concatenate` 等命令的 taxon 匹配 | O(n²) 线性扫描 → 哈希查找 | 消除随 taxon 数二次方增长（`concatenate` 等 3 处） |
-| 逐行 SQLite INSERT（3 处命令） | 补上显式事务，避免每行触发一次 autocommit | 最多 ~700x |
+| contig/probe 名称匹配（默认 `--regex`） | 手写扫描替代通用正则引擎（`fast_extract`） | ~2.7x |
+| `concatenate` 等命令的 taxon 匹配 | O(n²) 线性扫描 → 哈希查找 | 消除二次方增长 |
+| 逐行 SQLite INSERT（3 处命令） | 补上显式事务 | 最多 ~700x |
 | 并发任务调度 | `rayon` | ~1.8x–4.4x |
-| FASTA 解析 | 消除序列行的重复扫描（原来每行最多扫 3 遍） | ~1.3x |
-| FASTQ 长度/计数 | 逐行 `BufRead::lines()`（每行分配 `String` + UTF-8 校验）→ 字节级 `read_until` 读入复用缓冲区，只在真正需要时才转 UTF-8 | 长度提取 ~1.2x，纯计数 ~3.3x |
-| 2bit 解码 | 逐 base 除法+移位+查表 → 逐字节查 256 项表（一次查表拿到 4 个 base，`extend_from_slice` 写入） | ~2.8x–3x（~1.2 → ~3.3-3.6 Gbases/sec） |
-| 编译配置 | `[profile.release]` 开启 LTO + `codegen-units=1` | - |
-| 内存分配器 | `phyluce-cli` 换用 `mimalloc` | - |
+| FASTA/FASTQ 解析 | 消除逐行重复扫描；FASTQ 改用字节级 `read_until` | FASTA ~1.3x，FASTQ 长度 ~1.2x、计数 ~3.3x |
+| 2bit 解码 | 逐 base 查表 → 逐字节查 256 项表 | ~3x（~3.5 Gbases/sec） |
+| 编译配置 / 分配器 | LTO + `codegen-units=1`，`mimalloc` | - |
 
-**验证过但没有采用的优化**（同样先测再决定，负结果也如实记录）：
-
-- `ahash` 替代标准库 SipHash：已实测，收益边际，仅在已经因为改用哈希表而
-  受益的地方顺手用上，没有为此单独改动。
-- SIMD 解码 2bit：最初只测了朴素的逐 base 循环（~1.2 Gbases/sec），据此认为
-  "已经够快+`std::simd` 是 nightly-only"就没再深入——这个结论下得太早，见上表，
-  一个不需要 SIMD/unsafe/nightly 的查表方案就有 ~3x 提升，反而佐证了"先把
-  简单方案的账算清楚，再谈需不需要 SIMD"。查表方案封顶后（~3.5 Gbases/sec，
-  解码一整条人类染色体不到一秒）已经远超本项目实际需求，SIMD 在这基础上还能
-  再快多少没有验证，暂不追加。
-- `mmap` 读取 2bit 文件：实测评估后判断收益不足以抵消复杂度。
-- 引入 [rust-bio](https://github.com/rust-bio/rust-bio)（crates.io 上的
-  `bio`）替代自己的 FASTA/FASTQ reader：单独测过，它确实更快（同一份数据
-  上 FASTA 快 ~2x、FASTQ 快 ~1.8x），但会带来 83 个传递依赖（`ndarray`、
-  `nalgebra`、`statrs`、`petgraph` 等一整套统计/图/线性代数库），而
-  `phyluce-io` 是全项目每个命令都依赖的基础 crate；真实 UCE 流程里外部
-  工具（LASTZ/MAFFT/SPAdes 等）的子进程耗时才是大头，不是本身的文件解析。
-  没有加这个依赖，改成照着差距手动优化了上面那两行。
+验证过但没有采用：`ahash`（收益边际）、SIMD 解码 2bit（查表方案已够快，见上）、
+`mmap` 读 2bit（收益不抵复杂度）、引入 [rust-bio](https://github.com/rust-bio/rust-bio)
+替代自己的 FASTA/FASTQ reader（确实更快，但带来 83 个传递依赖，不值得）。
 
 ## 快速开始
 
