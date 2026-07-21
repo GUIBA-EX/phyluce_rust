@@ -12,6 +12,7 @@ use std::io::Write as _;
 use std::path::Path;
 
 use phyluce_align::Alignment;
+use phyluce_assembly::FastMap;
 
 type PartitionRange = (usize, usize);
 type Partition = (String, Vec<PartitionRange>);
@@ -71,8 +72,14 @@ fn slice_columns(alignment: &Alignment, start: usize, stop: usize) -> Alignment 
 }
 
 fn append_columns(alignment: &mut Alignment, other: &Alignment) {
+    // O(taxa) index instead of an O(taxa) `Vec::iter().find()` per row --
+    // same O(taxa^2)-per-call shape as the bug fixed in
+    // `phyluce-align::concat::concatenate`; see
+    // `bench_append_columns_scaling_with_taxon_count`.
+    let other_index: FastMap<&str, &phyluce_align::AlignmentRow> =
+        other.rows.iter().map(|r| (r.id.as_str(), r)).collect();
     for row in &mut alignment.rows {
-        if let Some(o) = other.rows.iter().find(|r| r.id == row.id) {
+        if let Some(o) = other_index.get(row.id.as_str()) {
             row.seq.extend_from_slice(&o.seq);
         }
     }
@@ -172,6 +179,41 @@ pub fn run(phylip_alignment: &Path, config: &Path, output: &Path) -> anyhow::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Ad hoc benchmark: `append_columns` does an `other.rows.iter().find()`
+    // (linear scan) per row in `alignment`, called once per extra range in
+    // a multi-range partition -- the same O(taxa^2)-per-call shape found
+    // (and fixed) in `phyluce-align::concat::concatenate`. Run with:
+    //   cargo +stable test --release -p phyluce-cli --lib -- --ignored --nocapture bench_append_columns
+    fn synthetic_alignment(n_taxa: usize, seq_len: usize, seed: u8) -> Alignment {
+        let rows = (0..n_taxa)
+            .map(|i| phyluce_align::AlignmentRow {
+                id: format!("taxon_{i}"),
+                seq: vec![b"ACGT"[(i + seed as usize) % 4]; seq_len],
+            })
+            .collect();
+        Alignment { rows }
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_append_columns_scaling_with_taxon_count() {
+        for n_taxa in [100usize, 200, 400, 800] {
+            let mut base = synthetic_alignment(n_taxa, 100, 0);
+            let extra = synthetic_alignment(n_taxa, 100, 1);
+            let start = std::time::Instant::now();
+            // A partition with 20 ranges calls append_columns 19 times.
+            for _ in 0..19 {
+                append_columns(&mut base, &extra);
+            }
+            let elapsed = start.elapsed();
+            eprintln!(
+                "[bench] append_columns x19: {n_taxa} taxa in {:?} ({:.3} ms/call)",
+                elapsed,
+                elapsed.as_secs_f64() * 1000.0 / 19.0
+            );
+        }
+    }
 
     #[test]
     fn rejects_phylip_dimension_mismatches() {
