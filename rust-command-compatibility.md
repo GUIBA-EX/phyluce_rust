@@ -43,8 +43,10 @@ phyluce_workflow
   corresponding paths in `phyluce.conf`.
 - `reconstruct-uce-from-probe` uses MAFFT by default for multi-probe loci;
   `--muscle-binary` explicitly selects the legacy MUSCLE 3/Clustal path.
-- Some Python 2 or Python 3-incompatible original scripts are matched to their
-  intended behavior rather than their runtime failure mode.
+- `prep-uce-align-files-for-ncbi` (`phyluce_ncbi_prep_uce_align_files_for_ncbi`)
+  crashes on import against modern Biopython (`from Bio.Alphabet import IUPAC`
+  -- `Bio.Alphabet` was removed). This port matches its intended behavior
+  rather than that runtime failure.
 - `get-match-counts --optimize` implements the intended exhaustive and random
   search behavior. Exhaustive rows are also written to the required output
   path, `--keep-counts` writes its CSV correctly, and Rust adds `--seed` for
