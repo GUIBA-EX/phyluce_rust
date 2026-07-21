@@ -1,0 +1,20 @@
+# YAML 1.2
+---
+cff-version: "1.2.0"
+message: "If you use this software, please cite it using the metadata below. A companion manuscript describing this Rust port is in preparation for bioRxiv; the citation for it will be added here once it is posted."
+title: "phyluce_rust: a Rust port of the PHYLUCE UCE phylogenomics toolkit"
+type: software
+authors:
+  - family-names: Xia
+    given-names: Fei
+repository-code: "https://github.com/GUIBA-EX/phyluce_rust"
+license: BSD-3-Clause
+references:
+  - type: article
+    title: "PHYLUCE is a software package for the analysis of conserved genomic loci"
+    authors:
+      - family-names: Faircloth
+        given-names: "Brant Chipstead"
+    doi: "10.1093/bioinformatics/btv646"
+    notes: "The original Python implementation this project is a Rust port of."
+...

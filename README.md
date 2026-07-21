@@ -138,3 +138,11 @@ python3 tests/compat/run_fixtures.py target/debug/phyluce
 该命令只使用仓库内 fixture，可在独立克隆中运行。执行包含原版 Python 和外部
 工具的完整对照时，设置 `PHYLUCE_PYTHON_REPO=/path/to/phyluce` 后运行
 `python3 tests/compat/run_all.py target/debug/phyluce`。
+
+## 版权与引用
+
+本仓库（Rust 移植版本）的著作权归 GUIBA-EX 所有；原版 Python `phyluce` 的著作权归
+Brant C. Faircloth 所有——具体条款见 [LICENSE](LICENSE)（BSD-3-Clause，保留原作者版权声明）。
+
+如在论文中使用本软件，请引用本仓库；对应的 bioRxiv 预印本正在准备中，发布后会更新
+此处的引用信息。机器可读的引用元数据见 [CITATION.cff](CITATION.cff)。
