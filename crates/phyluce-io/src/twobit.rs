@@ -380,6 +380,70 @@ mod tests {
         buf
     }
 
+    // Ad hoc benchmark for `read_slice`'s decode loop: is it actually a
+    // bottleneck at chromosome scale, before reaching for SIMD? Run with:
+    //   cargo +stable test --release -p phyluce-io --lib -- --ignored --nocapture bench_twobit_decode
+    fn build_large_fixture(n_bases: usize) -> Vec<u8> {
+        let name = b"chr1";
+        // Deterministic pseudo-random 2-bit codes packed 4/byte, no N or
+        // mask blocks (isolates the base-unpacking loop specifically).
+        let mut packed = Vec::with_capacity(n_bases.div_ceil(4));
+        let mut state: u64 = 0x243F6A8885A308D3;
+        let mut byte = 0u8;
+        let mut in_byte = 0usize;
+        for _ in 0..n_bases {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let code = (state & 0x3) as u8;
+            byte |= code << (6 - 2 * in_byte);
+            in_byte += 1;
+            if in_byte == 4 {
+                packed.push(byte);
+                byte = 0;
+                in_byte = 0;
+            }
+        }
+        if in_byte > 0 {
+            packed.push(byte);
+        }
+
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&SIGNATURE.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.extend_from_slice(&1u32.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.push(name.len() as u8);
+        buf.extend_from_slice(name);
+        let seq_offset_pos = buf.len();
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        let seq_offset = buf.len() as u32;
+        buf[seq_offset_pos..seq_offset_pos + 4].copy_from_slice(&seq_offset.to_le_bytes());
+        buf.extend_from_slice(&(n_bases as u32).to_le_bytes()); // dnaSize
+        buf.extend_from_slice(&0u32.to_le_bytes()); // nBlockCount
+        buf.extend_from_slice(&0u32.to_le_bytes()); // maskBlockCount
+        buf.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        buf.extend_from_slice(&packed);
+        buf
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_twobit_decode_full_chromosome() {
+        for n_bases in [1_000_000usize, 20_000_000] {
+            let tb = TwoBitFile::from_bytes(build_large_fixture(n_bases)).unwrap();
+            let start = std::time::Instant::now();
+            let seq = tb.read_full("chr1").unwrap();
+            let elapsed = start.elapsed();
+            assert_eq!(seq.len(), n_bases);
+            eprintln!(
+                "[bench] decode {n_bases} bases in {:?} ({:.0} Mbases/sec)",
+                elapsed,
+                n_bases as f64 / elapsed.as_secs_f64() / 1e6
+            );
+        }
+    }
+
     #[test]
     fn decodes_bases_mask_and_n_blocks() {
         let tb = TwoBitFile::from_bytes(build_fixture()).unwrap();
