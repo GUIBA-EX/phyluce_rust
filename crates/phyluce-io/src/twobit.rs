@@ -233,7 +233,7 @@ impl TwoBitFile {
             .source
             .read_at(checked_add(layout.packed_offset, packed_start)?, packed_len)?;
 
-        const BASES: [u8; 4] = [b'T', b'C', b'A', b'G'];
+        const BASES: [u8; 4] = *b"TCAG";
         let mut seq = Vec::with_capacity((end - start) as usize);
         for position in start..end {
             let byte = packed[(position / 4 - packed_start) as usize];

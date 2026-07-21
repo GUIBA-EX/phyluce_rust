@@ -158,9 +158,7 @@ mod tests {
         let taxa: Vec<String> = (0..n_taxa).map(|i| format!("taxon_{i}")).collect();
         let mut out = Vec::with_capacity(n_loci);
         for locus in 0..n_loci {
-            let seq: Vec<u8> = (0..seq_len)
-                .map(|i| b"ACGT"[(locus + i) % 4])
-                .collect();
+            let seq: Vec<u8> = (0..seq_len).map(|i| b"ACGT"[(locus + i) % 4]).collect();
             let rows: Vec<AlignmentRow> = taxa
                 .iter()
                 .enumerate()

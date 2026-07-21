@@ -1,5 +1,7 @@
 # phyluce Rust CLI
 
+[![CI](https://github.com/GUIBA-EX/phyluce_rust/actions/workflows/ci.yml/badge.svg)](https://github.com/GUIBA-EX/phyluce_rust/actions/workflows/ci.yml)
+
 [phyluce](https://github.com/faircloth-lab/phyluce)（UCE 系统发育基因组学工具包）
 的 Rust 移植版本：同一套命令、同一套旧脚本名，单一静态二进制，不需要 Python/conda
 环境。

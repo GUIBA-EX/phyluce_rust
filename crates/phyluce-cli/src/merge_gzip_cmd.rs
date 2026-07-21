@@ -57,8 +57,8 @@ pub fn run(config: &Path, output: &Path, section: &str, trimmed: bool) -> anyhow
             }
         }
 
-        let sample_dir = crate::output_path::output_file(output, name)?
-            .join("split-adapter-quality-trimmed");
+        let sample_dir =
+            crate::output_path::output_file(output, name)?.join("split-adapter-quality-trimmed");
         std::fs::create_dir_all(&sample_dir)?;
 
         for (files, read_kind) in [

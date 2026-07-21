@@ -112,7 +112,13 @@ mod tests {
         let args = build_hash_args("base/triCas1", "base/triCas1");
         assert_eq!(
             args,
-            vec!["build-hash", "--genome", "base/triCas1", "-H", "base/triCas1"]
+            vec![
+                "build-hash",
+                "--genome",
+                "base/triCas1",
+                "-H",
+                "base/triCas1"
+            ]
         );
     }
 

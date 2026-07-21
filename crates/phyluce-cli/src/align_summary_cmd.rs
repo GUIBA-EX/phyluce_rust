@@ -155,7 +155,7 @@ fn print_aggregate_summary(rows: &[SummaryRow], show_taxon_counts: bool) -> anyh
         }
     }
     let all_characters: usize = characters.values().sum();
-    let nucleotides: usize = [b'A', b'C', b'G', b'T']
+    let nucleotides: usize = b"ACGT"
         .iter()
         .map(|base| characters.get(base).copied().unwrap_or(0))
         .sum();

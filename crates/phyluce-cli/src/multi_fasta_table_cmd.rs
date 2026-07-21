@@ -195,8 +195,11 @@ mod tests {
             .unwrap();
         let start = std::time::Instant::now();
         for i in 0..n {
-            conn.execute("INSERT INTO t (id, v) VALUES (?1, ?2)", rusqlite::params![i, "x"])
-                .unwrap();
+            conn.execute(
+                "INSERT INTO t (id, v) VALUES (?1, ?2)",
+                rusqlite::params![i, "x"],
+            )
+            .unwrap();
         }
         let autocommit_elapsed = start.elapsed();
         drop(conn);
@@ -210,8 +213,11 @@ mod tests {
         let start = std::time::Instant::now();
         let tx = conn.unchecked_transaction().unwrap();
         for i in 0..n {
-            tx.execute("INSERT INTO t (id, v) VALUES (?1, ?2)", rusqlite::params![i, "x"])
-                .unwrap();
+            tx.execute(
+                "INSERT INTO t (id, v) VALUES (?1, ?2)",
+                rusqlite::params![i, "x"],
+            )
+            .unwrap();
         }
         tx.commit().unwrap();
         let tx_elapsed = start.elapsed();

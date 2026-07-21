@@ -736,7 +736,14 @@ mod tests {
     }
 
     const FUZZ_SEEDS: &[u64] = &[
-        0xC0FFEE, 0xDEADBEEF, 1, 2, 42, 0x1234_5678_9ABC_DEF0, 0xFFFF_FFFF, 0x5EED_5EED,
+        0xC0FFEE,
+        0xDEADBEEF,
+        1,
+        2,
+        42,
+        0x1234_5678_9ABC_DEF0,
+        0xFFFF_FFFF,
+        0x5EED_5EED,
     ];
 
     #[test]
@@ -757,7 +764,10 @@ mod tests {
                     .and_then(|c| c.get(1))
                     .map(|m| m.as_str().to_string());
                 let actual = extract_probe_name(header, &re).ok();
-                assert_eq!(expected, actual, "diverged on header={header:?} (seed={seed:#x})");
+                assert_eq!(
+                    expected, actual,
+                    "diverged on header={header:?} (seed={seed:#x})"
+                );
             }
         }
     }
@@ -781,7 +791,10 @@ mod tests {
                     .and_then(|c| c.get(1))
                     .map(|m| m.as_str().to_string());
                 let actual = extract_contig_name(header, &re).ok();
-                assert_eq!(expected, actual, "diverged on header={header:?} (seed={seed:#x})");
+                assert_eq!(
+                    expected, actual,
+                    "diverged on header={header:?} (seed={seed:#x})"
+                );
             }
         }
     }
@@ -973,7 +986,9 @@ mod tests {
         let start = std::time::Instant::now();
         let mut total_len2 = 0usize;
         for row in &rows {
-            header_re.captures_read(&mut header_locs, &row.name1).unwrap();
+            header_re
+                .captures_read(&mut header_locs, &row.name1)
+                .unwrap();
             let (s1, e1) = header_locs.get(1).unwrap();
             let contig = &row.name1[s1..e1];
             probe_re.captures_read(&mut probe_locs, &row.name2).unwrap();
@@ -1079,7 +1094,10 @@ mod tests {
             "NODE_1".to_string(),
             FastSet::from_iter(["uce-1".to_string(), "uce-2".to_string()]),
         );
-        matches.insert("NODE_2".to_string(), FastSet::from_iter(["uce-3".to_string()]));
+        matches.insert(
+            "NODE_2".to_string(),
+            FastSet::from_iter(["uce-3".to_string()]),
+        );
         let dupes = contigs_matching_multiple_uces(&matches);
         assert_eq!(dupes, FastSet::from_iter(["NODE_1".to_string()]));
     }
@@ -1091,7 +1109,10 @@ mod tests {
             "uce-1".to_string(),
             FastSet::from_iter(["NODE_1".to_string(), "NODE_2".to_string()]),
         );
-        revmatches.insert("uce-2".to_string(), FastSet::from_iter(["NODE_3".to_string()]));
+        revmatches.insert(
+            "uce-2".to_string(),
+            FastSet::from_iter(["NODE_3".to_string()]),
+        );
         let (dupe_contigs, dupe_uces) = loci_matching_multiple_contigs(&revmatches);
         assert_eq!(
             dupe_contigs,
@@ -1112,7 +1133,10 @@ mod tests {
         let conn = db::create_probe_database(&db_path, &organisms, &uces).unwrap();
 
         let mut matches = FastMap::default();
-        matches.insert("NODE_1".to_string(), FastSet::from_iter(["uce-1".to_string()]));
+        matches.insert(
+            "NODE_1".to_string(),
+            FastSet::from_iter(["uce-1".to_string()]),
+        );
         let mut orientation = FastMap::default();
         orientation.insert("uce-1".to_string(), FastSet::from_iter(["+".to_string()]));
         db::store_lastz_results(&conn, &matches, &orientation, "taxon_a").unwrap();

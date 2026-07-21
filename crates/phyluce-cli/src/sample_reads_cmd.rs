@@ -77,10 +77,7 @@ fn run_seqkit(
     // --help warns against this on large files); sample by proportion
     // instead, which it streams.
     let file_reads = count_fastq_reads(Path::new(fastq))?;
-    anyhow::ensure!(
-        file_reads > 0,
-        "{fastq} has no reads to sample from"
-    );
+    anyhow::ensure!(file_reads > 0, "{fastq} has no reads to sample from");
     let proportion = (reads as f64 / file_reads as f64).min(1.0);
 
     let out = std::fs::OpenOptions::new()
