@@ -4,14 +4,17 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_assembly::explode::{locus_key, taxon_key};
 use phyluce_io::{read_fasta, write_fasta_record};
 
 pub fn run(input: &Path, output: &Path, by_taxon: bool, split_char: &str) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output)?;
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("creating output directory {}", output.display()))?;
 
     crate::cli_info!("Reading fasta...");
-    let records = read_fasta(input)?;
+    let records =
+        read_fasta(input).with_context(|| format!("reading fasta {}", input.display()))?;
     let mut groups: HashMap<String, Vec<&phyluce_io::FastaRecord>> = HashMap::new();
     for record in &records {
         let key = if by_taxon {
@@ -26,7 +29,8 @@ pub fn run(input: &Path, output: &Path, by_taxon: bool, split_char: &str) -> any
     for (key, seqs) in &groups {
         let out_path: PathBuf =
             crate::output_path::output_file(output, &format!("{key}.unaligned.fasta"))?;
-        let mut out = std::fs::File::create(out_path)?;
+        let mut out = std::fs::File::create(&out_path)
+            .with_context(|| format!("creating output file {}", out_path.display()))?;
         for seq in seqs {
             write_fasta_record(&mut out, &seq.description, &seq.sequence)?;
         }

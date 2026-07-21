@@ -7,6 +7,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context;
+
 const ALIGNMENT_EXTENSIONS: &[&str] = &[".phylip", ".phy", ".phylip-relaxed"];
 
 /// A small xorshift-style PRNG, seeded from the OS, standing in for
@@ -48,7 +50,9 @@ pub fn run(
     bootreps: usize,
 ) -> anyhow::Result<()> {
     let mut loci: Vec<String> = Vec::new();
-    for entry in std::fs::read_dir(alignments_dir)? {
+    for entry in std::fs::read_dir(alignments_dir)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?
+    {
         let path = entry?.path();
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             if ALIGNMENT_EXTENSIONS.iter().any(|ext| name.ends_with(ext)) {
@@ -80,8 +84,15 @@ pub fn run(
     for (locus, count) in &counter {
         out.push_str(&format!("{} {count}\n", path.join(locus).display()));
     }
-    std::fs::write(bootstrap_counts, out)?;
+    std::fs::write(bootstrap_counts, out)
+        .with_context(|| format!("writing bootstrap counts {}", bootstrap_counts.display()))?;
 
-    phyluce_genetrees::bootstrap::write_replicates(bootstrap_replicates, &replicates)?;
+    phyluce_genetrees::bootstrap::write_replicates(bootstrap_replicates, &replicates)
+        .with_context(|| {
+            format!(
+                "writing bootstrap replicates {}",
+                bootstrap_replicates.display()
+            )
+        })?;
     Ok(())
 }

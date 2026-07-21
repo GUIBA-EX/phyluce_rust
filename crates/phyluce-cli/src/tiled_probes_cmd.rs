@@ -9,6 +9,8 @@
 use std::io::Write as _;
 use std::path::Path;
 
+use anyhow::Context;
+
 pub struct TiledProbesArgs {
     pub probe_prefix: String,
     pub designer: String,
@@ -107,7 +109,8 @@ pub fn run(
     args: &TiledProbesArgs,
 ) -> anyhow::Result<()> {
     validate_tiling(args.length, args.density)?;
-    let records = phyluce_io::read_fasta(input)?;
+    let records = phyluce_io::read_fasta(input)
+        .with_context(|| format!("reading input FASTA {}", input.display()))?;
 
     let mut probe_set: Vec<Vec<Probe>> = Vec::new();
     for (i, record) in records.iter().enumerate() {
@@ -192,12 +195,25 @@ pub fn run(
     crate::cli_warn!("Conserved locus count = {cons_count}");
     crate::cli_warn!("Probe Count = {probe_count}");
 
-    let mut outp = std::fs::File::create(output)?;
-    let mut outpb = probe_bed.map(std::fs::File::create).transpose()?;
+    let mut outp = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
+    let mut outpb = match probe_bed {
+        Some(path) => Some(
+            std::fs::File::create(path)
+                .with_context(|| format!("creating probe bed output {}", path.display()))?,
+        ),
+        None => None,
+    };
     if let Some(f) = outpb.as_mut() {
         writeln!(f, "track name=get_tiled_probes description=\"get_tiled_probes designed probes\" useScore=1 useScore=1 itemRgb=\"On\"")?;
     }
-    let mut outlb = locus_bed.map(std::fs::File::create).transpose()?;
+    let mut outlb = match locus_bed {
+        Some(path) => Some(
+            std::fs::File::create(path)
+                .with_context(|| format!("creating locus bed output {}", path.display()))?,
+        ),
+        None => None,
+    };
     if let Some(f) = outlb.as_mut() {
         writeln!(f, "track name=get_tiled_probes_loci description=\"get_tiled_probes loci\" useScore=1 useScore=1 itemRgb=\"On\"")?;
     }

@@ -34,8 +34,14 @@ pub fn convert_abyss_contigs_to_velvet(contigs_file: &Path) -> anyhow::Result<Pa
         .unwrap_or(Path::new("."))
         .join(format!("{stem}-velvet.fa"));
 
-    let records = read_fasta(contigs_file)?;
-    let mut out = std::fs::File::create(&out_path)?;
+    let records = read_fasta(contigs_file)
+        .with_context(|| format!("reading contigs file {}", contigs_file.display()))?;
+    let mut out = std::fs::File::create(&out_path).with_context(|| {
+        format!(
+            "creating velvet-style contigs output {}",
+            out_path.display()
+        )
+    })?;
     for record in &records {
         let parts: Vec<&str> = record.description.split(' ').collect();
         // mirrors `seq.description.split(" ")[:3]`: description's first
@@ -79,8 +85,12 @@ fn run_abyss_pe(
     if let Some(s) = &reads.singleton {
         cmd.arg(format!("se={}", s.display()));
     }
-    let out = std::fs::File::create(output.join(format!("abyss-k{kmer}.out.log")))?;
-    let err = std::fs::File::create(output.join(format!("abyss-k{kmer}.err.log")))?;
+    let out_log = output.join(format!("abyss-k{kmer}.out.log"));
+    let err_log = output.join(format!("abyss-k{kmer}.err.log"));
+    let out = std::fs::File::create(&out_log)
+        .with_context(|| format!("creating abyss-pe stdout log {}", out_log.display()))?;
+    let err = std::fs::File::create(&err_log)
+        .with_context(|| format!("creating abyss-pe stderr log {}", err_log.display()))?;
     cmd.stdout(out).stderr(err);
     let status = cmd.status().context("running abyss-pe")?;
     anyhow::ensure!(status.success(), "abyss-pe failed: {status}");
@@ -107,8 +117,12 @@ fn run_abyss_se(
             cmd.arg(s);
         }
     }
-    let out = std::fs::File::create(output.join(format!("abyss-k{kmer}.out.log")))?;
-    let err = std::fs::File::create(output.join(format!("abyss-k{kmer}.err.log")))?;
+    let out_log = output.join(format!("abyss-k{kmer}.out.log"));
+    let err_log = output.join(format!("abyss-k{kmer}.err.log"));
+    let out = std::fs::File::create(&out_log)
+        .with_context(|| format!("creating abyss stdout log {}", out_log.display()))?;
+    let err = std::fs::File::create(&err_log)
+        .with_context(|| format!("creating abyss stderr log {}", err_log.display()))?;
     cmd.stdout(out).stderr(err);
     let status = cmd.status().context("running abyss")?;
     anyhow::ensure!(status.success(), "abyss failed: {status}");
@@ -117,33 +131,48 @@ fn run_abyss_se(
 
 fn cleanup_abyss_assembly_folder(output: &Path, single_end: bool) -> anyhow::Result<()> {
     let mut keep = vec!["coverage.hist".to_string()];
-    for entry in std::fs::read_dir(output)? {
+    for entry in std::fs::read_dir(output)
+        .with_context(|| format!("reading abyss output directory {}", output.display()))?
+    {
         let path = entry?.path();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         if name.ends_with(".log") || name.ends_with("-stats") {
             keep.push(name);
         }
     }
-    for entry in std::fs::read_dir(output)? {
+    for entry in std::fs::read_dir(output)
+        .with_context(|| format!("reading abyss output directory {}", output.display()))?
+    {
         let path = entry?.path();
-        if path.symlink_metadata()?.file_type().is_symlink()
+        if path
+            .symlink_metadata()
+            .with_context(|| format!("reading symlink metadata for {}", path.display()))?
+            .file_type()
+            .is_symlink()
             && path.extension().and_then(|e| e.to_str()) == Some("fa")
         {
-            let real = std::fs::canonicalize(&path)?;
-            std::fs::remove_file(&path)?;
-            std::fs::rename(&real, &path)?;
+            let real = std::fs::canonicalize(&path)
+                .with_context(|| format!("resolving symlink target for {}", path.display()))?;
+            std::fs::remove_file(&path)
+                .with_context(|| format!("removing symlink {}", path.display()))?;
+            std::fs::rename(&real, &path)
+                .with_context(|| format!("renaming {} to {}", real.display(), path.display()))?;
             keep.push(path.file_name().unwrap().to_string_lossy().to_string());
         }
     }
     if single_end {
-        for entry in std::fs::read_dir(output)? {
+        for entry in std::fs::read_dir(output)
+            .with_context(|| format!("reading abyss output directory {}", output.display()))?
+        {
             let path = entry?.path();
             if path.extension().and_then(|e| e.to_str()) == Some("fa") {
                 keep.push(path.file_name().unwrap().to_string_lossy().to_string());
             }
         }
     }
-    for entry in std::fs::read_dir(output)? {
+    for entry in std::fs::read_dir(output)
+        .with_context(|| format!("reading abyss output directory {}", output.display()))?
+    {
         let path = entry?.path();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         if !keep.contains(&name) {
@@ -154,7 +183,8 @@ fn cleanup_abyss_assembly_folder(output: &Path, single_end: bool) -> anyhow::Res
 }
 
 fn find_contigs_file(output: &Path) -> anyhow::Result<PathBuf> {
-    std::fs::read_dir(output)?
+    std::fs::read_dir(output)
+        .with_context(|| format!("reading sample output directory {}", output.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .find(|p| {
@@ -190,16 +220,20 @@ pub fn run(
     let abyss_pe_bin = cfg.get_user_path("binaries", "abyss-pe").ok();
     let abyss_bin = cfg.get_user_path("binaries", "abyss").ok();
 
-    std::fs::create_dir_all(output)?;
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("creating output directory {}", output.display()))?;
     let contig_dir = output.join("contigs");
-    std::fs::create_dir_all(&contig_dir)?;
+    std::fs::create_dir_all(&contig_dir)
+        .with_context(|| format!("creating contigs directory {}", contig_dir.display()))?;
 
     let input_data = get_input_data(config, dir)?;
     for (sample, sample_input_dir) in &input_data {
         crate::cli_info!("Processing {sample}");
         let sample_dir = crate::output_path::output_file(output, sample)?;
-        std::fs::create_dir_all(&sample_dir)?;
-        let reads = get_input_files(sample_input_dir, subfolder)?;
+        std::fs::create_dir_all(&sample_dir)
+            .with_context(|| format!("creating sample directory {}", sample_dir.display()))?;
+        let reads = get_input_files(sample_input_dir, subfolder)
+            .with_context(|| format!("reading input reads from {}", sample_input_dir.display()))?;
 
         let single_end;
         if !abyss_se && reads.r1.is_some() && reads.r2.is_some() {

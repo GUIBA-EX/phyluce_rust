@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_align::nexus::format_nexus;
 use phyluce_io::write_fasta_record;
 
@@ -23,7 +24,8 @@ pub fn run(
         "output format '{output_format}' is not yet supported (only fasta/nexus)"
     );
     crate::output_path::prepare_output_dir(output_dir)?;
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     anyhow::ensure!(
         !files.is_empty(),
         "There are no {input_format}-formatted alignments in {}",
@@ -42,15 +44,18 @@ pub fn run(
     crate::parallel::try_map_ordered(files, cores, |file| {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let stem = name.split('.').next().unwrap_or(name);
-        let alignment = load_alignment(&file, input_format)?;
+        let alignment = load_alignment(&file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         let out_path = output_dir.join(format!("{stem}.{output_format}"));
         if output_format == "fasta" {
-            let mut out = std::fs::File::create(out_path)?;
+            let mut out = std::fs::File::create(&out_path)
+                .with_context(|| format!("creating output file {}", out_path.display()))?;
             for row in &alignment.rows {
                 write_fasta_record(&mut out, &row.id, std::str::from_utf8(&row.seq)?)?;
             }
         } else {
-            std::fs::write(out_path, format_nexus(&alignment))?;
+            std::fs::write(&out_path, format_nexus(&alignment))
+                .with_context(|| format!("writing nexus output to {}", out_path.display()))?;
         }
         Ok(())
     })?;

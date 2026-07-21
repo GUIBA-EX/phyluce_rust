@@ -4,18 +4,21 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::{read_fasta, write_fasta_record};
 use regex::Regex;
 
 pub fn run(probes: &Path, taxa: &[String], output: &Path, regex_str: &str) -> anyhow::Result<()> {
     let regex = Regex::new(regex_str)?;
-    let records = read_fasta(probes)?;
+    let records =
+        read_fasta(probes).with_context(|| format!("reading probes {}", probes.display()))?;
 
     let mut taxa_counts: HashMap<String, usize> = HashMap::new();
     let mut kept_loci: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut probes_kept = 0usize;
 
-    let mut out = std::fs::File::create(output)?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     for record in &records {
         // mirrors `seq.description.split("|")[1].split(",")[4].split(":")[1]`
         let field =

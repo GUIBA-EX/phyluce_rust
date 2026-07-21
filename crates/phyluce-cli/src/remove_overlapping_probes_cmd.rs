@@ -4,10 +4,12 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::{read_fasta, write_fasta_record};
 
 pub fn run(probes: &Path, config: &Path, output: &Path) -> anyhow::Result<()> {
-    let conf_text = std::fs::read_to_string(config)?;
+    let conf_text = std::fs::read_to_string(config)
+        .with_context(|| format!("reading config {}", config.display()))?;
     let sections = crate::conf::parse_ini(&conf_text);
     let excludes: HashSet<String> = sections
         .get("exclude")
@@ -15,10 +17,12 @@ pub fn run(probes: &Path, config: &Path, output: &Path) -> anyhow::Result<()> {
         .unwrap_or_default();
     crate::cli_info!("There are {} loci to exclude", excludes.len());
 
-    let records = read_fasta(probes)?;
+    let records =
+        read_fasta(probes).with_context(|| format!("reading fasta {}", probes.display()))?;
     let mut kept_loci = HashSet::new();
     let mut dropped_loci = HashSet::new();
-    let mut out = std::fs::File::create(output)?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     for record in &records {
         let locus = record
             .id

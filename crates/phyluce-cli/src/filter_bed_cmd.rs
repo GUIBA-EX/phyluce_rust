@@ -5,19 +5,25 @@ use std::collections::HashSet;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_io::read_fasta;
 
 pub fn run(bed: &Path, fasta: &Path, output: Option<PathBuf>) -> anyhow::Result<()> {
-    let records = read_fasta(fasta)?;
+    let records =
+        read_fasta(fasta).with_context(|| format!("reading fasta {}", fasta.display()))?;
     let loci: HashSet<String> = records
         .iter()
         .filter_map(|r| r.description.split('|').nth(1))
         .map(|s| s.trim().to_string())
         .collect();
 
-    let bed_text = std::fs::read_to_string(bed)?;
+    let bed_text = std::fs::read_to_string(bed)
+        .with_context(|| format!("reading BED file {}", bed.display()))?;
     let mut out: Box<dyn std::io::Write> = match &output {
-        Some(p) => Box::new(std::fs::File::create(p)?),
+        Some(p) => Box::new(
+            std::fs::File::create(p)
+                .with_context(|| format!("creating output file {}", p.display()))?,
+        ),
         None => Box::new(std::io::stdout()),
     };
     for line in bed_text.lines() {

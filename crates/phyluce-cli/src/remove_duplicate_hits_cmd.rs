@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_io::lastz::read_lastz;
 use phyluce_io::{read_fasta, write_fasta_record};
 use regex::Regex;
@@ -21,7 +22,8 @@ fn get_dupes(
     regex: &Regex,
     long_format: bool,
 ) -> anyhow::Result<HashSet<String>> {
-    let matches_list = read_lastz(lastz_file, long_format)?;
+    let matches_list = read_lastz(lastz_file, long_format)
+        .with_context(|| format!("reading lastz output {}", lastz_file.display()))?;
     let mut matches: HashMap<String, Vec<String>> = HashMap::new();
     for m in &matches_list {
         let target = probe_name(&m.name1, regex)?;
@@ -70,8 +72,10 @@ pub fn run(
     let dupes = get_dupes(lastz_file, &regex, long)?;
 
     let fasta_output = screened_filename(fasta);
-    let records = read_fasta(fasta)?;
-    let mut out = std::fs::File::create(&fasta_output)?;
+    let records =
+        read_fasta(fasta).with_context(|| format!("reading fasta {}", fasta.display()))?;
+    let mut out = std::fs::File::create(&fasta_output)
+        .with_context(|| format!("creating output file {}", fasta_output.display()))?;
     let mut fasta_kept = 0usize;
     for record in &records {
         let locus = probe_name(&record.id, &regex)?;
@@ -88,8 +92,10 @@ pub fn run(
 
     if let Some(probe_bed) = probe_bed {
         let output = screened_filename(probe_bed);
-        let text = std::fs::read_to_string(probe_bed)?;
-        let mut out = std::fs::File::create(&output)?;
+        let text = std::fs::read_to_string(probe_bed)
+            .with_context(|| format!("reading BED file {}", probe_bed.display()))?;
+        let mut out = std::fs::File::create(&output)
+            .with_context(|| format!("creating output file {}", output.display()))?;
         use std::io::Write as _;
         let mut kept = 0usize;
         let mut count = 0usize;
@@ -117,8 +123,10 @@ pub fn run(
 
     if let Some(locus_bed) = locus_bed {
         let output = screened_filename(locus_bed);
-        let text = std::fs::read_to_string(locus_bed)?;
-        let mut out = std::fs::File::create(&output)?;
+        let text = std::fs::read_to_string(locus_bed)
+            .with_context(|| format!("reading BED file {}", locus_bed.display()))?;
+        let mut out = std::fs::File::create(&output)
+            .with_context(|| format!("creating output file {}", output.display()))?;
         use std::io::Write as _;
         let mut kept = 0usize;
         let mut count = 0usize;

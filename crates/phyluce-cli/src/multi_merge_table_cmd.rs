@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::sql::ident;
 use rusqlite::Connection;
 
@@ -43,7 +44,8 @@ fn insert_interval(
 }
 
 pub fn run_get(conf: &Path, output: &Path, base_taxon: &str) -> anyhow::Result<()> {
-    let conf_text = std::fs::read_to_string(conf)?;
+    let conf_text = std::fs::read_to_string(conf)
+        .with_context(|| format!("reading conf file {}", conf.display()))?;
     let sections = crate::conf::parse_ini(&conf_text);
     let beds = sections
         .get("beds")
@@ -54,7 +56,8 @@ pub fn run_get(conf: &Path, output: &Path, base_taxon: &str) -> anyhow::Result<(
     crate::cli_info!("Reading the BED file for:");
     for (taxon_name, bedfile) in beds {
         organisms.push(taxon_name.clone());
-        let text = std::fs::read_to_string(bedfile)?;
+        let text = std::fs::read_to_string(bedfile)
+            .with_context(|| format!("reading BED file {bedfile}"))?;
         for line in text.lines() {
             let fields: Vec<&str> = line.trim().split('\t').collect();
             if fields.len() < 3 {
@@ -68,9 +71,11 @@ pub fn run_get(conf: &Path, output: &Path, base_taxon: &str) -> anyhow::Result<(
     }
 
     if output.exists() {
-        std::fs::remove_file(output)?;
+        std::fs::remove_file(output)
+            .with_context(|| format!("removing stale output database {}", output.display()))?;
     }
-    let conn = Connection::open(output)?;
+    let conn = Connection::open(output)
+        .with_context(|| format!("creating merge table database {}", output.display()))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let table = ident(base_taxon);
     let columns = organisms
@@ -125,7 +130,8 @@ pub fn run_query(
     if specific_counts.is_some() {
         anyhow::ensure!(output.is_some(), "--specific-counts requires --output");
     }
-    let conn = Connection::open(db)?;
+    let conn = Connection::open(db)
+        .with_context(|| format!("opening merge table database {}", db.display()))?;
     let table = ident(base_taxon);
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let columns: Vec<String> = stmt
@@ -146,8 +152,10 @@ pub fn run_query(
         let threshold = threshold as i64;
         let output = output.unwrap();
         let missing_path = format!("{}.missing.matrix", output.display());
-        let mut out1 = std::fs::File::create(output)?;
-        let mut out2 = std::fs::File::create(&missing_path)?;
+        let mut out1 = std::fs::File::create(output)
+            .with_context(|| format!("creating output file {}", output.display()))?;
+        let mut out2 = std::fs::File::create(&missing_path)
+            .with_context(|| format!("creating missing-matrix output file {missing_path}"))?;
         use std::io::Write as _;
         writeln!(out2, "{}", taxa.join(","))?;
 

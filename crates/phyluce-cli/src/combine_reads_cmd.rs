@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context;
 use regex::Regex;
 
 fn read_key(basename: &str, re: &Regex) -> Option<String> {
@@ -15,7 +16,8 @@ fn read_key(basename: &str, re: &Regex) -> Option<String> {
 }
 
 pub fn run(config: &Path, output: &Path, subfolder: &str) -> anyhow::Result<()> {
-    let text = std::fs::read_to_string(config)?;
+    let text = std::fs::read_to_string(config)
+        .with_context(|| format!("reading config file {}", config.display()))?;
     let directories = crate::conf::read_ini_values(&text, "samples")?;
 
     // mirrors `(?:.*)[_-](?:READ|Read|R)(\d)*[_-]*(singleton)*(?:.*)`
@@ -48,7 +50,8 @@ pub fn run(config: &Path, output: &Path, subfolder: &str) -> anyhow::Result<()> 
         } else {
             crate::output_path::output_file(&sample_dir, subfolder)?
         };
-        std::fs::create_dir_all(&output_dir)?;
+        std::fs::create_dir_all(&output_dir)
+            .with_context(|| format!("creating output directory {}", output_dir.display()))?;
         crate::cli_info!("Processing {name}");
         for (read, files) in &all_files {
             crate::cli_info!("\tProcessing read {read}");
@@ -58,9 +61,11 @@ pub fn run(config: &Path, output: &Path, subfolder: &str) -> anyhow::Result<()> 
                 format!("{name}-READ-{read}.fastq.gz")
             };
             let new_file_path = output_dir.join(&new_file_name);
-            let mut out = std::fs::File::create(&new_file_path)?;
+            let mut out = std::fs::File::create(&new_file_path)
+                .with_context(|| format!("creating output file {}", new_file_path.display()))?;
             for (i, file) in files.iter().enumerate() {
-                let mut input = std::fs::File::open(file)?;
+                let mut input = std::fs::File::open(file)
+                    .with_context(|| format!("opening input file {}", file.display()))?;
                 std::io::copy(&mut input, &mut out)?;
                 if i == 0 {
                     crate::cli_info!(

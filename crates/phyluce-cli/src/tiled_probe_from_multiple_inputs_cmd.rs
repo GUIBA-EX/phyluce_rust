@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_io::FastaRecord;
 
 pub struct TilingArgs {
@@ -29,7 +30,9 @@ pub struct TilingArgs {
 
 fn get_fasta_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
+    for entry in std::fs::read_dir(dir)
+        .with_context(|| format!("reading fastas directory {}", dir.display()))?
+    {
         let path = entry?.path();
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             if matches!(ext, "fasta" | "fsa" | "aln" | "fa") {
@@ -178,7 +181,12 @@ pub fn run(
     args: &TilingArgs,
 ) -> anyhow::Result<()> {
     validate_tiling(args.length, args.density)?;
-    let conf_text = std::fs::read_to_string(multi_fasta_output)?;
+    let conf_text = std::fs::read_to_string(multi_fasta_output).with_context(|| {
+        format!(
+            "reading multi-fasta-output file {}",
+            multi_fasta_output.display()
+        )
+    })?;
     let sections = crate::conf::parse_ini(&conf_text);
     let hits = sections
         .get("hits")
@@ -194,7 +202,8 @@ pub fn run(
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        let records = phyluce_io::read_fasta(&file)?;
+        let records = phyluce_io::read_fasta(&file)
+            .with_context(|| format!("reading fasta {}", file.display()))?;
         for record in &records {
             let fields: Vec<&str> = record.id.split('|').collect();
             if fields.len() < 4 {
@@ -222,7 +231,8 @@ pub fn run(
     crate::cli_warn!("Conserved locus count = {cons_count}");
     crate::cli_warn!("Probe Count = {probe_count}");
 
-    let mut out = std::fs::File::create(output)?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     for ps in &probe_set {
         for (header, seq) in ps {
             writeln!(out, ">{header}\n{seq}")?;

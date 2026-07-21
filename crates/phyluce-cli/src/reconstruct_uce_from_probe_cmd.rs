@@ -10,6 +10,7 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use anyhow::Context;
 use phyluce_io::FastaRecord;
 
 /// Mirrors `Bio.Align.AlignInfo.SummaryInfo.dumb_consensus` with its
@@ -114,7 +115,8 @@ pub fn run(
     muscle_bin: Option<&str>,
     mafft_bin: Option<&str>,
 ) -> anyhow::Result<()> {
-    let records = phyluce_io::read_fasta(input)?;
+    let records = phyluce_io::read_fasta(input)
+        .with_context(|| format!("reading input FASTA {}", input.display()))?;
     crate::cli_warn!(
         "There are {} baits in {}",
         records.len(),
@@ -136,7 +138,8 @@ pub fn run(
         d.entry(locus).or_default().push(record);
     }
 
-    let mut out = std::fs::File::create(output)?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     let mut count = 0usize;
     for locus in &buckets {
         let recs = &d[locus];

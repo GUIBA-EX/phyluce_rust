@@ -17,6 +17,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use anyhow::Context;
+
 /// Simple xorshift RNG, consistent with the pattern used elsewhere in
 /// this port (e.g. `bootstrap_count_cmd`) -- not a reproduction of
 /// Python's Mersenne Twister, just a stand-in for `random.randrange`
@@ -40,7 +42,8 @@ impl SimpleRng {
 }
 
 fn count_fastq_reads(path: &Path) -> anyhow::Result<usize> {
-    Ok(phyluce_io::fastq::fastq_record_count(path)?)
+    phyluce_io::fastq::fastq_record_count(path)
+        .with_context(|| format!("counting reads in {}", path.display()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -83,11 +86,13 @@ fn run_seqkit(
     let out = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&out_fname)?;
+        .open(&out_fname)
+        .with_context(|| format!("creating output file {}", out_fname.display()))?;
     let err = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&err_fname)?;
+        .open(&err_fname)
+        .with_context(|| format!("creating seqkit error log {}", err_fname.display()))?;
     let seed = rand.to_string();
     let proportion_arg = proportion.to_string();
     let status = Command::new(seqkit_bin)
@@ -137,7 +142,8 @@ pub fn run(conf: &Path, output: &Path) -> anyhow::Result<()> {
     let cfg = phyluce_config::PhyluceConfig::load()?;
     let seqkit_bin = cfg.get_user_path("binaries", "seqkit")?;
 
-    let conf_text = std::fs::read_to_string(conf)?;
+    let conf_text = std::fs::read_to_string(conf)
+        .with_context(|| format!("reading config {}", conf.display()))?;
     let reads = crate::conf::read_ini_values(&conf_text, "reads")?;
     let sections = crate::conf::parse_ini(&conf_text);
     let splits = sections

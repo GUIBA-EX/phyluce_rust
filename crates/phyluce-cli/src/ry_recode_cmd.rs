@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_align::nexus::format_nexus;
 use phyluce_align::{Alignment, AlignmentRow};
 
@@ -45,7 +46,8 @@ pub fn run(
 ) -> anyhow::Result<()> {
     anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     crate::output_path::prepare_output_dir(output_dir)?;
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     crate::parallel::ensure_unique_output_names(files.iter().map(|file| {
         let name = file
             .file_name()
@@ -64,7 +66,8 @@ pub fn run(
     crate::parallel::try_map_ordered(files, cores, |file| {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let stem = name.split('.').next().unwrap_or(name);
-        let alignment = load_alignment(&file, input_format)?;
+        let alignment = load_alignment(&file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         let recoded = Alignment {
             rows: alignment
                 .rows
@@ -76,7 +79,8 @@ pub fn run(
                 .collect(),
         };
         let out_path = output_dir.join(format!("{stem}.nexus"));
-        std::fs::write(out_path, format_nexus(&recoded))?;
+        std::fs::write(&out_path, format_nexus(&recoded))
+            .with_context(|| format!("writing nexus output to {}", out_path.display()))?;
         Ok(())
     })?;
     for _ in 0..count {

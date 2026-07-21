@@ -38,7 +38,8 @@ pub fn run(
         crate::cli_info!("Removing ALL sequences with ambiguous bases...");
     }
 
-    let records = read_fasta(input)?;
+    let records =
+        read_fasta(input).with_context(|| format!("reading input FASTA {}", input.display()))?;
     let mut loci: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for record in records {
         // mirrors `record.description.split("|")[1].rstrip("_phased")`
@@ -80,7 +81,8 @@ pub fn run(
     let mut work: Vec<(String, Vec<(String, String)>)> = loci.into_iter().collect();
     work.sort_by(|left, right| left.0.cmp(&right.0));
     let results = crate::parallel::try_map_ordered(work, cores, |(locus, sequences)| {
-        let raw = run_mafft(&mafft_bin, &sequences)?;
+        let raw = run_mafft(&mafft_bin, &sequences)
+            .with_context(|| format!("running mafft for locus {locus}"))?;
         let aligned = if no_trim {
             Some(raw)
         } else {
@@ -114,6 +116,7 @@ pub fn run(
 
 fn write_output(output_dir: &Path, locus: &str, alignment: &Alignment) -> anyhow::Result<()> {
     let out_path = crate::output_path::output_file(output_dir, &format!("{locus}.nexus"))?;
-    std::fs::write(out_path, format_nexus(alignment))?;
+    std::fs::write(&out_path, format_nexus(alignment))
+        .with_context(|| format!("writing nexus output to {}", out_path.display()))?;
     Ok(())
 }

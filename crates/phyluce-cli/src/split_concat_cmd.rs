@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_align::charset::{parse_charsets, slice_alignment};
 use phyluce_align::nexus::{format_nexus, parse_nexus};
 use phyluce_io::write_fasta_record;
@@ -14,7 +15,8 @@ pub fn run(nexus_path: &Path, output_dir: &Path, output_format: &str) -> anyhow:
     );
     crate::output_path::prepare_output_dir(output_dir)?;
 
-    let text = std::fs::read_to_string(nexus_path)?;
+    let text = std::fs::read_to_string(nexus_path)
+        .with_context(|| format!("reading nexus file {}", nexus_path.display()))?;
     let mut charsets = parse_charsets(&text);
     charsets.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -37,12 +39,14 @@ pub fn run(nexus_path: &Path, output_dir: &Path, output_format: &str) -> anyhow:
         let ext = output_format;
         let out_path = output_dir.join(format!("{stem}.{ext}"));
         if output_format == "fasta" {
-            let mut out = std::fs::File::create(out_path)?;
+            let mut out = std::fs::File::create(&out_path)
+                .with_context(|| format!("creating output file {}", out_path.display()))?;
             for row in &filtered.rows {
                 write_fasta_record(&mut out, &row.id, std::str::from_utf8(&row.seq)?)?;
             }
         } else {
-            std::fs::write(out_path, format_nexus(&filtered))?;
+            std::fs::write(&out_path, format_nexus(&filtered))
+                .with_context(|| format!("writing output file {}", out_path.display()))?;
         }
     }
     Ok(())

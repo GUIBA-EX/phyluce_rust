@@ -21,6 +21,11 @@ pub enum ConfigError {
     NoKey(String, String),
     #[error("CONDA_PREFIX is not set; cannot expand $CONDA in config value")]
     NoCondaPrefix,
+    #[error("reading config file {path}: {source}")]
+    ReadFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -156,7 +161,12 @@ impl PhyluceConfig {
     pub fn load_package_only() -> Result<Self, ConfigError> {
         let default_path = Self::find_default_config();
         let text = match &default_path {
-            Some(path) => std::fs::read_to_string(path)?,
+            Some(path) => {
+                std::fs::read_to_string(path).map_err(|source| ConfigError::ReadFile {
+                    path: path.clone(),
+                    source,
+                })?
+            }
             None => EMBEDDED_DEFAULT_CONFIG.to_string(),
         };
         let ini = Ini::parse(&text);
@@ -173,7 +183,12 @@ impl PhyluceConfig {
             None => Self::find_default_config(),
         };
         let text = match &default_path {
-            Some(path) => std::fs::read_to_string(path)?,
+            Some(path) => {
+                std::fs::read_to_string(path).map_err(|source| ConfigError::ReadFile {
+                    path: path.clone(),
+                    source,
+                })?
+            }
             None => EMBEDDED_DEFAULT_CONFIG.to_string(),
         };
         let mut ini = Ini::parse(&text);
@@ -181,7 +196,12 @@ impl PhyluceConfig {
         let user_path = dirs_home().map(|h| h.join(".phyluce.conf"));
         if let Some(up) = &user_path {
             if up.is_file() {
-                let user_ini = Ini::parse(&std::fs::read_to_string(up)?);
+                let user_text =
+                    std::fs::read_to_string(up).map_err(|source| ConfigError::ReadFile {
+                        path: up.clone(),
+                        source,
+                    })?;
+                let user_ini = Ini::parse(&user_text);
                 ini.merge(&user_ini);
             }
         }

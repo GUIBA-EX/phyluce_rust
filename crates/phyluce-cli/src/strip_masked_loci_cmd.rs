@@ -4,6 +4,7 @@
 use std::io::Write as _;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::twobit::TwoBitFile;
 
 pub fn run(
@@ -14,9 +15,12 @@ pub fn run(
     max_n: usize,
     min_length: i64,
 ) -> anyhow::Result<()> {
-    let tb = TwoBitFile::open(twobit)?;
-    let bed_text = std::fs::read_to_string(bed)?;
-    let mut out = std::fs::File::create(output)?;
+    let tb = TwoBitFile::open(twobit)
+        .with_context(|| format!("opening 2bit file {}", twobit.display()))?;
+    let bed_text = std::fs::read_to_string(bed)
+        .with_context(|| format!("reading BED file {}", bed.display()))?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
 
     let mut filtered = 0usize;
     let mut kept = 0usize;

@@ -8,10 +8,17 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_assembly::FastMap;
 
 pub fn run(input: &Path, bootstrap_replicates: &Path, output: &Path) -> anyhow::Result<()> {
-    let replicates = phyluce_genetrees::bootstrap::read_replicates(bootstrap_replicates)?;
+    let replicates = phyluce_genetrees::bootstrap::read_replicates(bootstrap_replicates)
+        .with_context(|| {
+            format!(
+                "reading bootstrap replicates {}",
+                bootstrap_replicates.display()
+            )
+        })?;
 
     crate::cli_info!("Reading bootstrap replicates");
     // `VecDeque` rather than `Vec`: the write loop below drains each
@@ -22,7 +29,9 @@ pub fn run(input: &Path, bootstrap_replicates: &Path, output: &Path) -> anyhow::
     // `tests::bench_vec_remove_front_vs_vecdeque_pop_front` (2000 loci x
     // 500 replicates: ~134ms with `Vec::remove(0)` vs ~43ms here).
     let mut all_bootreps: FastMap<String, VecDeque<String>> = FastMap::default();
-    for entry in std::fs::read_dir(input)? {
+    for entry in std::fs::read_dir(input)
+        .with_context(|| format!("reading input directory {}", input.display()))?
+    {
         let dir = entry?.path();
         if !dir.is_dir() {
             continue;
@@ -32,7 +41,8 @@ pub fn run(input: &Path, bootstrap_replicates: &Path, output: &Path) -> anyhow::
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
-        let mut bootrep_files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)?
+        let mut bootrep_files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .with_context(|| format!("reading locus directory {}", dir.display()))?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| {
@@ -47,14 +57,17 @@ pub fn run(input: &Path, bootstrap_replicates: &Path, output: &Path) -> anyhow::
             bootrep_files.len() == 1,
             "There appear to be >1 bootstrap files in {dir_name}"
         );
-        let text = std::fs::read_to_string(bootrep_files.remove(0))?;
+        let bootrep_file = bootrep_files.remove(0);
+        let text = std::fs::read_to_string(&bootrep_file)
+            .with_context(|| format!("reading bootstrap file {}", bootrep_file.display()))?;
         let lines: VecDeque<String> = text.lines().map(|l| format!("{l}\n")).collect();
         all_bootreps.insert(dir_name, lines);
         print!(".");
     }
 
     crate::cli_info!("\nWriting bootstrap replicates");
-    std::fs::create_dir_all(output)?;
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("creating output directory {}", output.display()))?;
     for (n, replicate) in replicates.iter().enumerate() {
         let out_path = output.join(format!("boot{n:03}"));
         let mut out = String::new();
@@ -71,7 +84,8 @@ pub fn run(input: &Path, bootstrap_replicates: &Path, output: &Path) -> anyhow::
             })?;
             out.push_str(&line);
         }
-        std::fs::write(out_path, out)?;
+        std::fs::write(&out_path, out)
+            .with_context(|| format!("writing sorted bootstrap file {}", out_path.display()))?;
         print!(".");
     }
     crate::cli_info!();

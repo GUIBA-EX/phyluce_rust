@@ -3,6 +3,8 @@
 
 use std::path::Path;
 
+use anyhow::Context;
+
 use crate::informative_sites_cmd::find_alignment_files;
 
 pub fn run(
@@ -15,7 +17,8 @@ pub fn run(
 ) -> anyhow::Result<()> {
     anyhow::ensure!(cores > 0, "--cores must be greater than zero");
     crate::output_path::prepare_output_dir(output_dir)?;
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     let min_count = (percent * taxa as f64).floor() as usize;
 
     let total = files.len();
@@ -23,7 +26,9 @@ pub fn run(
         let alignment = crate::informative_sites_cmd::load_alignment(&file, input_format)?;
         if alignment.ntax() >= min_count {
             let dest = output_dir.join(file.file_name().unwrap());
-            std::fs::copy(&file, dest)?;
+            std::fs::copy(&file, &dest).with_context(|| {
+                format!("copying alignment {} to {}", file.display(), dest.display())
+            })?;
             Ok(true)
         } else {
             Ok(false)

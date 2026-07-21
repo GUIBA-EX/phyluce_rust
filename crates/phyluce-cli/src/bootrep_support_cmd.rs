@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_genetrees::newick::{parse, Node};
 
 use crate::conf::parse_ini;
@@ -49,7 +50,8 @@ fn ci95(values: &[f64]) -> f64 {
 /// Mirrors the legacy script's hardcoded `open("outfile.csv", "w")` --
 /// there is no `--output` CLI argument in the Python original.
 pub fn run(trees_dir: &Path, config: &Path) -> anyhow::Result<()> {
-    let conf_text = std::fs::read_to_string(config)?;
+    let conf_text = std::fs::read_to_string(config)
+        .with_context(|| format!("reading config file {}", config.display()))?;
     let sections = parse_ini(&conf_text);
 
     let mut out = String::from("set,mean bootrep support\n");
@@ -57,7 +59,8 @@ pub fn run(trees_dir: &Path, config: &Path) -> anyhow::Result<()> {
         let mut section_means = Vec::new();
         for (locus, _) in entries {
             let tree_path = trees_dir.join(locus).join("RAxML_bipartitions.FINAL");
-            let text = std::fs::read_to_string(&tree_path)?;
+            let text = std::fs::read_to_string(&tree_path)
+                .with_context(|| format!("reading bootstrap tree file {}", tree_path.display()))?;
             let tree = parse(&text)?;
             let support = support_values(&tree, locus)?;
             section_means.push(mean(&support));
@@ -73,7 +76,7 @@ pub fn run(trees_dir: &Path, config: &Path) -> anyhow::Result<()> {
             out.push_str(&format!("{section},{value}\n"));
         }
     }
-    std::fs::write("outfile.csv", out)?;
+    std::fs::write("outfile.csv", out).context("writing bootstrap support summary outfile.csv")?;
     Ok(())
 }
 

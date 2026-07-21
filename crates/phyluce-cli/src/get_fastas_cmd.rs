@@ -25,7 +25,12 @@ pub fn run(
     extend_locus_db: Option<PathBuf>,
     extend_locus_contigs: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let config = read_taxon_list_config(match_count_output)?;
+    let config = read_taxon_list_config(match_count_output).with_context(|| {
+        format!(
+            "reading match-count-output config {}",
+            match_count_output.display()
+        )
+    })?;
     let organisms = config
         .get("Organisms")
         .cloned()
@@ -48,12 +53,14 @@ pub fn run(
         );
     }
 
-    let conn = Connection::open(locus_db)?;
+    let conn = Connection::open(locus_db)
+        .with_context(|| format!("opening locus database {}", locus_db.display()))?;
     if let Some(extend) = &extend_locus_db {
         conn.execute(
             "ATTACH DATABASE ?1 AS extended",
             [extend.to_string_lossy().as_ref()],
-        )?;
+        )
+        .with_context(|| format!("attaching extended locus database {}", extend.display()))?;
     }
 
     let cfg = PhyluceConfig::load()?;
@@ -63,12 +70,16 @@ pub fn run(
     let header_regex = contig_header_regex(&header_fragments)?;
     let node_regex = node_with_strand_regex(&header_fragments)?;
 
-    let mut incomplete_writer = match &incomplete_matrix_out {
-        Some(p) => Some(std::fs::File::create(p)?),
-        None => None,
-    };
+    let mut incomplete_writer =
+        match &incomplete_matrix_out {
+            Some(p) => Some(std::fs::File::create(p).with_context(|| {
+                format!("creating incomplete matrix output file {}", p.display())
+            })?),
+            None => None,
+        };
 
-    let mut out = std::fs::File::create(output)?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     let uces_all: HashSet<String> = uces.iter().cloned().collect();
 
     for organism in &organisms {
@@ -110,7 +121,8 @@ pub fn run(
         let mut n_replace_count = 0usize;
         let mut header_fallback_count = 0usize;
 
-        let records = read_fasta(&reads)?;
+        let records = read_fasta(&reads)
+            .with_context(|| format!("reading contigs fasta {}", reads.display()))?;
         for record in &records {
             if nodes_written.len() == node_dict_set.len() {
                 break;

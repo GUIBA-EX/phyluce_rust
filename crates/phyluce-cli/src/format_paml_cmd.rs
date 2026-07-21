@@ -11,6 +11,7 @@
 use std::io::Write as _;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_align::Alignment;
 use phyluce_assembly::FastMap;
 
@@ -153,11 +154,15 @@ fn parse_partitions(config_text: &str, nchar: usize) -> anyhow::Result<Vec<Parti
 }
 
 pub fn run(phylip_alignment: &Path, config: &Path, output: &Path) -> anyhow::Result<()> {
-    let aln = parse_relaxed_phylip(&std::fs::read_to_string(phylip_alignment)?)?;
-    let config_text = std::fs::read_to_string(config)?;
+    let phylip_text = std::fs::read_to_string(phylip_alignment)
+        .with_context(|| format!("reading PHYLIP alignment {}", phylip_alignment.display()))?;
+    let aln = parse_relaxed_phylip(&phylip_text)?;
+    let config_text = std::fs::read_to_string(config)
+        .with_context(|| format!("reading partition config {}", config.display()))?;
     let partitions = parse_partitions(&config_text, aln.nchar())?;
 
-    let mut out = std::fs::File::create(output)?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     for (line, coordinates) in partitions {
         let mut new_align: Option<Alignment> = None;
         for (start, stop) in coordinates {

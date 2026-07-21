@@ -160,7 +160,8 @@ pub fn run(
     }
     crate::output_path::ensure_output_not_input(output, &protected_inputs)?;
 
-    let conn = Connection::open(locus_db)?;
+    let conn = Connection::open(locus_db)
+        .with_context(|| format!("opening locus database {}", locus_db.display()))?;
     if let Some(extend) = &extend_locus_db {
         conn.execute(
             "ATTACH DATABASE ?1 AS extended",
@@ -168,7 +169,8 @@ pub fn run(
         )?;
     }
 
-    let config = read_taxon_list_config(taxon_list_config)?;
+    let config = read_taxon_list_config(taxon_list_config)
+        .with_context(|| format!("reading taxon list config {}", taxon_list_config.display()))?;
     let organisms = taxa_from_config(&config, taxon_group)
         .with_context(|| format!("taxon-group '{taxon_group}'"))?;
     crate::cli_info!(

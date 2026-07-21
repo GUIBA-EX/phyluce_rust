@@ -38,11 +38,14 @@ pub fn run(
     // hold precomputed `<stem>.lastz` files (e.g. replaying fixtures in an
     // environment without lastz installed), so it's left untouched.
     if skip_alignment {
-        std::fs::create_dir_all(output_dir)?;
+        std::fs::create_dir_all(output_dir)
+            .with_context(|| format!("creating output directory {}", output_dir.display()))?;
     } else if output_dir.exists() {
         if force {
-            std::fs::remove_dir_all(output_dir)?;
-            std::fs::create_dir_all(output_dir)?;
+            std::fs::remove_dir_all(output_dir)
+                .with_context(|| format!("removing output directory {}", output_dir.display()))?;
+            std::fs::create_dir_all(output_dir)
+                .with_context(|| format!("creating output directory {}", output_dir.display()))?;
         } else {
             anyhow::bail!(
                 "output directory {} already exists; pass --force to overwrite",
@@ -50,12 +53,14 @@ pub fn run(
             );
         }
     } else {
-        std::fs::create_dir_all(output_dir)?;
+        std::fs::create_dir_all(output_dir)
+            .with_context(|| format!("creating output directory {}", output_dir.display()))?;
     }
 
     let probe_regex = Regex::new(regex_str).context("invalid --regex")?;
 
-    let probe_records = read_fasta(probes_path)?;
+    let probe_records = read_fasta(probes_path)
+        .with_context(|| format!("reading probes fasta {}", probes_path.display()))?;
     let mut uces: BTreeSet<String> = BTreeSet::new();
     for record in &probe_records {
         uces.insert(extract_probe_name(&record.id, &probe_regex)?);
@@ -63,7 +68,8 @@ pub fn run(
 
     let dupes: FastSet<String> = match &dupefile {
         Some(path) => {
-            let matches = read_lastz(path, false)?;
+            let matches = read_lastz(path, false)
+                .with_context(|| format!("reading dupefile {}", path.display()))?;
             get_probe_dupes(&matches, &probe_regex)?
         }
         None => FastSet::default(),
@@ -71,7 +77,9 @@ pub fn run(
 
     let mut fasta_files: Vec<PathBuf> = Vec::new();
     for ext in ["fasta", "fa", "fna"] {
-        for entry in std::fs::read_dir(contigs_dir)? {
+        for entry in std::fs::read_dir(contigs_dir)
+            .with_context(|| format!("reading contigs directory {}", contigs_dir.display()))?
+        {
             let entry = entry?;
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some(ext) {
@@ -98,17 +106,22 @@ pub fn run(
     let uces_vec: Vec<String> = uces.into_iter().collect();
     let db_path = output_dir.join("probe.matches.sqlite");
     if db_path.is_file() {
-        std::fs::remove_file(&db_path)?;
+        std::fs::remove_file(&db_path)
+            .with_context(|| format!("removing stale probe database {}", db_path.display()))?;
     }
     let conn = db::create_probe_database(&db_path, &organisms, &uces_vec)?;
 
     let mut dupe_writer = match &keep_duplicates {
-        Some(p) => Some(std::fs::File::create(p)?),
+        Some(p) => Some(
+            std::fs::File::create(p)
+                .with_context(|| format!("creating duplicates report file {}", p.display()))?,
+        ),
         None => None,
     };
     let mut csv_writer = match &csv_path {
         Some(p) => {
-            let mut w = csv::Writer::from_path(p)?;
+            let mut w = csv::Writer::from_path(p)
+                .with_context(|| format!("creating CSV output file {}", p.display()))?;
             w.write_record([
                 "taxon",
                 "uce-contigs",
@@ -142,7 +155,8 @@ pub fn run(
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
         ));
-        let contigs = contig_count(contig_path)?;
+        let contigs = contig_count(contig_path)
+            .with_context(|| format!("counting contigs in {}", contig_path.display()))?;
 
         if let Some(lastz_bin) = &lastz_bin {
             run_lastz_alignment(
@@ -161,7 +175,8 @@ pub fn run(
         }
 
         let result = process_taxon_lastz_iter(
-            iter_lastz(&lastz_output, false)?,
+            iter_lastz(&lastz_output, false)
+                .with_context(|| format!("reading lastz output {}", lastz_output.display()))?,
             &probe_regex,
             &header_regex,
             &dupes,

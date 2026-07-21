@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::{read_fasta, write_fasta_record};
 use regex::Regex;
 
@@ -64,7 +65,8 @@ fn cluster_loci(positions: &[(i64, String, i64, i64)], distance: i64) -> Vec<Has
 
 pub fn run(input: &Path, output: &Path, distance: i64, regex_str: &str) -> anyhow::Result<()> {
     let regex = Regex::new(regex_str)?;
-    let records = read_fasta(input)?;
+    let records =
+        read_fasta(input).with_context(|| format!("reading input fasta {}", input.display()))?;
 
     let mut positions_set: HashSet<(i64, String, i64, i64)> = HashSet::new();
     let mut starting_baits = 0usize;
@@ -108,7 +110,8 @@ pub fn run(input: &Path, output: &Path, distance: i64, regex_str: &str) -> anyho
         bad.len()
     );
 
-    let mut out = std::fs::File::create(output)?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     let mut kept_baits = 0usize;
     let mut kept_loci = HashSet::new();
     for record in &records {

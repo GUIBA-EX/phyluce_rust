@@ -4,6 +4,8 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use anyhow::Context;
+
 static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Create an output directory, or accept it only when it is already empty.
@@ -16,12 +18,16 @@ pub fn prepare_output_dir(directory: &Path) -> anyhow::Result<()> {
             directory.display()
         );
         anyhow::ensure!(
-            std::fs::read_dir(directory)?.next().is_none(),
+            std::fs::read_dir(directory)
+                .with_context(|| format!("reading output directory {}", directory.display()))?
+                .next()
+                .is_none(),
             "output directory {} is not empty; choose another directory or remove its contents",
             directory.display()
         );
     } else {
-        std::fs::create_dir_all(directory)?;
+        std::fs::create_dir_all(directory)
+            .with_context(|| format!("creating output directory {}", directory.display()))?;
     }
     Ok(())
 }
@@ -84,7 +90,8 @@ pub fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> anyhow::Result<(
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&temporary)?;
+        .open(&temporary)
+        .with_context(|| format!("creating temporary file {}", temporary.display()))?;
     let write_result = (|| -> std::io::Result<()> {
         file.write_all(contents.as_ref())?;
         file.sync_all()

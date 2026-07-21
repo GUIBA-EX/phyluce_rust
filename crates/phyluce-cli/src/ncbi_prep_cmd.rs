@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context;
+
 use crate::conf::parse_ini;
 use crate::informative_sites_cmd::{find_alignment_files, load_alignment};
 
@@ -105,7 +107,8 @@ pub fn run(
     output: &Path,
     input_format: &str,
 ) -> anyhow::Result<()> {
-    let conf_text = std::fs::read_to_string(conf_path)?;
+    let conf_text = std::fs::read_to_string(conf_path)
+        .with_context(|| format!("reading config {}", conf_path.display()))?;
     let sections = parse_ini(&conf_text);
 
     let remap = read_kv_map(&sections, "remap");
@@ -118,8 +121,10 @@ pub fn run(
     let taxon_excludes = read_bare_list(&sections, "exclude taxa");
     let locus_excludes = read_bare_list(&sections, "exclude loci");
 
-    let files = find_alignment_files(alignments_dir, input_format)?;
-    let mut out = std::fs::File::create(output)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     let mut counter = 0usize;
 
     for file in &files {
@@ -131,7 +136,8 @@ pub fn run(
         if locus_excludes.contains(&uce) {
             continue;
         }
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         for row in &alignment.rows {
             let (sp, species, partial, oldname) = get_species_name(&row.id, &remap);
             let _ = sp;

@@ -4,16 +4,19 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::{read_fasta, write_fasta_record, FastaRecord};
 
 pub fn run(contigs_dir: &Path, config: &Path, output: &Path) -> anyhow::Result<()> {
-    let config_text = std::fs::read_to_string(config)?;
+    let config_text = std::fs::read_to_string(config)
+        .with_context(|| format!("reading config file {}", config.display()))?;
     let ini = phyluce_config::Ini::parse(&config_text);
     let entries = ini
         .entries("assemblies")
         .ok_or_else(|| anyhow::anyhow!("no [assemblies] section in --config"))?;
 
-    let mut outf = std::fs::File::create(output)?;
+    let mut outf = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     let mut cache: HashMap<String, Option<HashMap<String, FastaRecord>>> = HashMap::new();
 
     for (raw_key, contig) in entries {

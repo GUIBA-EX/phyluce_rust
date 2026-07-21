@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_config::PhyluceConfig;
 use phyluce_external::ExternalCommand;
 use phyluce_io::{read_fasta, write_fasta_record, FastaRecord};
@@ -37,11 +38,13 @@ pub fn run(
         no_bold,
         "BOLD lookups are not implemented in the Rust port; pass --no-bold to run LASTZ slicing only"
     );
-    std::fs::create_dir_all(output_dir)?;
+    std::fs::create_dir_all(output_dir)
+        .with_context(|| format!("creating output directory {}", output_dir.display()))?;
     let cfg = PhyluceConfig::load()?;
     let lastz_bin = cfg.get_user_path("binaries", "lastz")?;
 
-    let mut fasta_files: Vec<std::path::PathBuf> = std::fs::read_dir(contigs_dir)?
+    let mut fasta_files: Vec<std::path::PathBuf> = std::fs::read_dir(contigs_dir)
+        .with_context(|| format!("reading contigs directory {}", contigs_dir.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
@@ -53,7 +56,8 @@ pub fn run(
     fasta_files.sort();
 
     for contig_path in &fasta_files {
-        let records = read_fasta(contig_path)?;
+        let records = read_fasta(contig_path)
+            .with_context(|| format!("reading contigs {}", contig_path.display()))?;
         let record_dict: HashMap<String, FastaRecord> =
             records.into_iter().map(|r| (r.id.clone(), r)).collect();
 
@@ -70,9 +74,11 @@ pub fn run(
                 format!("--output={}", lastz_output.display()),
                 "--format=general-:score,name1,strand1,zstart1,end1,length1,name2,strand2,zstart2,end2,length2,diff,cigar,identity,continuity".to_string(),
             ])
-            .run()?;
+            .run()
+            .with_context(|| format!("running lastz for {}", contig_path.display()))?;
 
-        let matches = phyluce_io::lastz::read_lastz(&lastz_output, false)?;
+        let matches = phyluce_io::lastz::read_lastz(&lastz_output, false)
+            .with_context(|| format!("reading lastz output {}", lastz_output.display()))?;
         let mut slices: Vec<(String, String)> = Vec::new();
         for m in &matches {
             let matching_contig = m.name2.split(' ').next().unwrap_or(&m.name2).to_string();
@@ -92,7 +98,8 @@ pub fn run(
         }
 
         let slices_output = output_dir.join(format!("{stem}.slices.fasta"));
-        let mut outf = std::fs::File::create(&slices_output)?;
+        let mut outf = std::fs::File::create(&slices_output)
+            .with_context(|| format!("creating slices output {}", slices_output.display()))?;
         for (id, seq) in &slices {
             write_fasta_record(&mut outf, id, seq)?;
         }

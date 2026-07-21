@@ -14,6 +14,8 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
+
 use crate::informative_sites_cmd::{find_alignment_files, load_alignment};
 
 #[allow(clippy::too_many_arguments)]
@@ -28,13 +30,15 @@ pub fn run(
     include_locus: bool,
 ) -> anyhow::Result<()> {
     crate::output_path::prepare_output_dir(output_dir)?;
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
 
     let mut names: HashMap<String, String> = HashMap::new();
     if let Some(conf_path) = conf {
         let section =
             section.ok_or_else(|| anyhow::anyhow!("--section is required with --conf"))?;
-        let text = std::fs::read_to_string(&conf_path)?;
+        let text = std::fs::read_to_string(&conf_path)
+            .with_context(|| format!("reading conf file {}", conf_path.display()))?;
         let ini = phyluce_config::Ini::parse(&text);
         if let Some(entries) = ini.entries(&section) {
             for (k, v) in entries {
@@ -57,7 +61,8 @@ pub fn run(
             std::io::stdout().flush().ok();
             let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
             let locus = name.split('.').next().unwrap_or(name).to_string();
-            let alignment = load_alignment(file, input_format)?;
+            let alignment = load_alignment(file, input_format)
+                .with_context(|| format!("loading alignment {}", file.display()))?;
             for row in &alignment.rows {
                 let taxon_name = row
                     .id
@@ -81,7 +86,9 @@ pub fn run(
                 } else {
                     let path =
                         crate::output_path::output_file(output_dir, &format!("{shortname}.fasta"))?;
-                    handles.insert(shortname.clone(), std::fs::File::create(path)?);
+                    let handle = std::fs::File::create(&path)
+                        .with_context(|| format!("creating output file {}", path.display()))?;
+                    handles.insert(shortname.clone(), handle);
                     handles.get_mut(&shortname).unwrap()
                 };
                 if include_locus {
@@ -99,9 +106,11 @@ pub fn run(
             std::io::stdout().flush().ok();
             let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
             let locus = name.split('.').next().unwrap_or(name).to_string();
-            let alignment = load_alignment(file, input_format)?;
+            let alignment = load_alignment(file, input_format)
+                .with_context(|| format!("loading alignment {}", file.display()))?;
             let out_path = output_dir.join(format!("{locus}.fasta"));
-            let mut outp = std::fs::File::create(out_path)?;
+            let mut outp = std::fs::File::create(&out_path)
+                .with_context(|| format!("creating output file {}", out_path.display()))?;
             let mut count = 0usize;
             for row in &alignment.rows {
                 let taxon_name = row

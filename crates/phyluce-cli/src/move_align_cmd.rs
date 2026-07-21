@@ -8,6 +8,8 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use anyhow::Context;
+
 pub fn run(
     conf: &Path,
     alignments_dir: &Path,
@@ -16,8 +18,10 @@ pub fn run(
     opposite: bool,
     extension: &str,
 ) -> anyhow::Result<()> {
-    crate::output_path::prepare_output_dir(output_dir)?;
-    let conf_text = std::fs::read_to_string(conf)?;
+    crate::output_path::prepare_output_dir(output_dir)
+        .with_context(|| format!("preparing output directory {}", output_dir.display()))?;
+    let conf_text = std::fs::read_to_string(conf)
+        .with_context(|| format!("reading conf file {}", conf.display()))?;
     let parsed = crate::conf::parse_ini(&conf_text);
 
     let section_names: Vec<String> = if sections.is_empty() {
@@ -35,7 +39,9 @@ pub fn run(
         }
     }
 
-    for entry in std::fs::read_dir(alignments_dir)? {
+    for entry in std::fs::read_dir(alignments_dir)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?
+    {
         let path = entry?.path();
         let basename = match path.file_name().and_then(|n| n.to_str()) {
             Some(n) => n,
@@ -54,7 +60,9 @@ pub fn run(
             !items.contains(stem)
         };
         if matches {
-            std::fs::copy(&path, output_dir.join(basename))?;
+            let dest = output_dir.join(basename);
+            std::fs::copy(&path, &dest)
+                .with_context(|| format!("copying {} to {}", path.display(), dest.display()))?;
         }
     }
     Ok(())

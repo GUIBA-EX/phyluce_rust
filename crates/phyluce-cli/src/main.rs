@@ -17,6 +17,7 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+use anyhow::Context;
 use clap::{ArgAction, Parser, Subcommand};
 use phyluce_config::PhyluceConfig;
 use phyluce_external::ExternalCommand;
@@ -1544,10 +1545,14 @@ fn init_file_logging(
     let Some(log_path) = log_path else {
         return Ok(());
     };
-    std::fs::create_dir_all(log_path)?;
+    std::fs::create_dir_all(log_path)
+        .with_context(|| format!("creating log directory {}", log_path.display()))?;
     let logfile = log_path.join(format!("{program_name}.log"));
     let writer = SharedLogWriter {
-        file: Arc::new(Mutex::new(File::create(logfile)?)),
+        file: Arc::new(Mutex::new(
+            File::create(&logfile)
+                .with_context(|| format!("creating log file {}", logfile.display()))?,
+        )),
     };
     let max_level = match verbosity {
         "CRITICAL" => LevelFilter::ERROR,
@@ -2067,7 +2072,8 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
                 flank.is_some() != probes.is_some(),
                 "exactly one of --flank or --probes must be given"
             );
-            let conf_text = std::fs::read_to_string(&conf)?;
+            let conf_text = std::fs::read_to_string(&conf)
+                .with_context(|| format!("reading config {}", conf.display()))?;
             let sections = conf::parse_ini(&conf_text);
             let mut genomes = Vec::new();
             for section in ["chromos", "scaffolds"] {
@@ -2583,7 +2589,8 @@ fn run_io(action: IoAction) -> anyhow::Result<()> {
 fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
     match action {
         AssemblyAction::GetFastaLengths { input, csv } => {
-            let lengths = fasta_lengths(&input)?;
+            let lengths = fasta_lengths(&input)
+                .with_context(|| format!("reading FASTA {}", input.display()))?;
             let report = stats::LengthReport::from_lengths(&lengths);
             if csv {
                 crate::cli_info!(
@@ -2598,7 +2605,8 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
             Ok(())
         }
         AssemblyAction::GetFastqLengths { input, csv } => {
-            let mut fastq_files: Vec<PathBuf> = std::fs::read_dir(&input)?
+            let mut fastq_files: Vec<PathBuf> = std::fs::read_dir(&input)
+                .with_context(|| format!("reading input directory {}", input.display()))?
                 .filter_map(|e| e.ok())
                 .map(|e| e.path())
                 .filter(|p| {
@@ -2616,7 +2624,9 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
 
             let mut lengths = Vec::new();
             for f in &fastq_files {
-                lengths.extend(fastq_lengths(f)?);
+                lengths.extend(
+                    fastq_lengths(f).with_context(|| format!("reading FASTQ {}", f.display()))?,
+                );
             }
             let last_basename = fastq_files
                 .last()
@@ -2803,7 +2813,8 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
 /// across the requested sections, tolerating both bare `name` lines
 /// (`allow_no_value`-style) and `name:value`/`name=value` lines.
 fn read_conf_section_items(path: &Path, sections: &[String]) -> anyhow::Result<HashSet<String>> {
-    let text = std::fs::read_to_string(path)?;
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading config {}", path.display()))?;
     let wanted: HashSet<&str> = sections.iter().map(|s| s.as_str()).collect();
     Ok(crate::conf::parse_ini(&text)
         .into_iter()
@@ -2831,8 +2842,10 @@ fn run_get_bed_from_lastz(
         _ => None,
     };
 
-    let matches = read_lastz(lastz_path, long_format)?;
-    let mut out = std::fs::File::create(output)?;
+    let matches = read_lastz(lastz_path, long_format)
+        .with_context(|| format!("reading lastz results {}", lastz_path.display()))?;
+    let mut out = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     for m in &matches {
         let name = match m.name2.split('|').nth(1) {
             Some(n) => n.to_string(),
@@ -2861,8 +2874,10 @@ fn run_utilities(action: UtilitiesAction) -> anyhow::Result<()> {
             output,
             locus_prefix,
         } => {
-            let records = read_fasta(&input)?;
-            let mut out = std::fs::File::create(&output)?;
+            let records = read_fasta(&input)
+                .with_context(|| format!("reading input FASTA {}", input.display()))?;
+            let mut out = std::fs::File::create(&output)
+                .with_context(|| format!("creating output file {}", output.display()))?;
             for record in &records {
                 let parts: Vec<&str> = record.id.split('|').collect();
                 let contig = parts

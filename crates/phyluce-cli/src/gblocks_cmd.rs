@@ -41,7 +41,8 @@ pub fn run(
     let cfg = PhyluceConfig::load()?;
     let gblocks_bin = cfg.get_user_path("binaries", "gblocks")?;
 
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     crate::parallel::ensure_unique_output_names(files.iter().map(|file| {
         let name = file
             .file_name()
@@ -60,7 +61,8 @@ pub fn run(
             .next()
             .unwrap_or("")
             .to_string();
-        let alignment = load_alignment(&file, input_format)?;
+        let alignment = load_alignment(&file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         let taxa = alignment.ntax();
 
         let b1_arg = (b1 * taxa as f64).round() as i64 + 1;
@@ -124,7 +126,8 @@ pub fn run(
                 );
                 return Ok(Some(format!("Missing information for locus {name}")));
             }
-            let records = read_fasta(&trimmed_path)?;
+            let records = read_fasta(&trimmed_path)
+                .with_context(|| format!("reading Gblocks output {}", trimmed_path.display()))?;
             let trimmed = phyluce_align::Alignment::from_pairs(
                 records.into_iter().map(|r| (r.id, r.sequence)).collect(),
             );
@@ -133,7 +136,8 @@ pub fn run(
             let ext = output_format;
             let out_path = output_dir.join(format!("{name}.{ext}"));
             if output_format == "fasta" {
-                let mut out = std::fs::File::create(out_path)?;
+                let mut out = std::fs::File::create(&out_path)
+                    .with_context(|| format!("creating output file {}", out_path.display()))?;
                 for row in &trimmed.rows {
                     phyluce_io::write_fasta_record(
                         &mut out,
@@ -142,7 +146,8 @@ pub fn run(
                     )?;
                 }
             } else {
-                std::fs::write(out_path, format_nexus(&trimmed))?;
+                std::fs::write(&out_path, format_nexus(&trimmed))
+                    .with_context(|| format!("writing NEXUS output {}", out_path.display()))?;
             }
             Ok(None)
         })();

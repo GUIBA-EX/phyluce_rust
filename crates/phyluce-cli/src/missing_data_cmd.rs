@@ -42,7 +42,12 @@ pub fn run(
 ) -> anyhow::Result<()> {
     crate::output_path::prepare_output_dir(output_dir)?;
 
-    let config = read_section_list_config(match_count_output)?;
+    let config = read_section_list_config(match_count_output).with_context(|| {
+        format!(
+            "reading match-count-output config {}",
+            match_count_output.display()
+        )
+    })?;
     let organisms: Vec<String> = config
         .get("Organisms")
         .context("no [Organisms] section in --match-count-output")?
@@ -51,17 +56,22 @@ pub fn run(
         .collect();
 
     let missing: Option<HashMap<String, Vec<String>>> = match &incomplete_matrix {
-        Some(p) => Some(read_section_list_config(p)?),
+        Some(p) => Some(
+            read_section_list_config(p)
+                .with_context(|| format!("reading incomplete-matrix config {}", p.display()))?,
+        ),
         None => None,
     };
 
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     let mut dropped = Vec::new();
 
     for file in &files {
         let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let locus = file_name.split('.').next().unwrap_or(file_name).to_string();
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
 
         if alignment.ntax() < min_taxa {
             dropped.push(file_name.to_string());
@@ -135,7 +145,8 @@ pub fn run(
 
         print!(".");
         let out_path = output_dir.join(format!("{locus}.nexus"));
-        std::fs::write(out_path, format_nexus(&Alignment { rows }))?;
+        std::fs::write(&out_path, format_nexus(&Alignment { rows }))
+            .with_context(|| format!("writing NEXUS output {}", out_path.display()))?;
     }
     crate::cli_info!();
     for name in &dropped {

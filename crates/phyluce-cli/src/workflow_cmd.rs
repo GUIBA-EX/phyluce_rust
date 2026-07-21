@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_config::PhyluceConfig;
 
 pub fn run(
@@ -20,7 +21,8 @@ pub fn run(
         matches!(workflow, "mapping" | "correction" | "phasing"),
         "--workflow must be one of: mapping, correction, phasing"
     );
-    std::fs::create_dir_all(output)?;
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("creating output directory {}", output.display()))?;
 
     let cfg = PhyluceConfig::load()?;
     let snake_file = cfg.get_user_path("workflows", workflow)?;

@@ -5,13 +5,15 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_io::read_fasta;
 use phyluce_io::sql::ident;
 use rusqlite::Connection;
 
 /// Mirrors `create_match_database` + the insert loop.
 pub fn run_get(fastas_dir: &Path, output: &Path, base_taxon: &str) -> anyhow::Result<()> {
-    let mut fasta_files: Vec<PathBuf> = std::fs::read_dir(fastas_dir)?
+    let mut fasta_files: Vec<PathBuf> = std::fs::read_dir(fastas_dir)
+        .with_context(|| format!("reading fastas directory {}", fastas_dir.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("fasta"))
@@ -28,7 +30,8 @@ pub fn run_get(fastas_dir: &Path, output: &Path, base_taxon: &str) -> anyhow::Re
             .unwrap_or("")
             .to_string();
         organisms.push(taxon_name.clone());
-        let records = read_fasta(fasta)?;
+        let records =
+            read_fasta(fasta).with_context(|| format!("reading fasta {}", fasta.display()))?;
         for record in &records {
             // mirrors `seq.id.split("|")[3].split(":")[1]`
             let locus = record
@@ -43,9 +46,11 @@ pub fn run_get(fastas_dir: &Path, output: &Path, base_taxon: &str) -> anyhow::Re
     }
 
     if output.exists() {
-        std::fs::remove_file(output)?;
+        std::fs::remove_file(output)
+            .with_context(|| format!("removing existing database {}", output.display()))?;
     }
-    let conn = Connection::open(output)?;
+    let conn = Connection::open(output)
+        .with_context(|| format!("opening database {}", output.display()))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let table = ident(base_taxon);
     let columns = organisms
@@ -86,7 +91,8 @@ pub fn run_query(
     if let Some(_sc) = specific_counts {
         anyhow::ensure!(output.is_some(), "--specific-counts requires --output");
     }
-    let conn = Connection::open(db)?;
+    let conn =
+        Connection::open(db).with_context(|| format!("opening database {}", db.display()))?;
     let table = ident(base_taxon);
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let columns: Vec<String> = stmt
@@ -105,8 +111,10 @@ pub fn run_query(
         let threshold = threshold as i64;
         let output = output.unwrap();
         let missing_path = format!("{}.missing.matrix", output.display());
-        let mut out1 = std::fs::File::create(output)?;
-        let mut out2 = std::fs::File::create(&missing_path)?;
+        let mut out1 = std::fs::File::create(output)
+            .with_context(|| format!("creating output file {}", output.display()))?;
+        let mut out2 = std::fs::File::create(&missing_path)
+            .with_context(|| format!("creating output file {missing_path}"))?;
         use std::io::Write as _;
         writeln!(out1, "# Hits against {threshold} taxa")?;
         writeln!(out1, "# {}", taxa.join(","))?;

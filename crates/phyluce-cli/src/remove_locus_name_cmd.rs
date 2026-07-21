@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_align::nexus::format_nexus;
 use phyluce_align::{Alignment, AlignmentRow};
 use phyluce_io::write_fasta_record;
@@ -34,7 +35,8 @@ pub fn run(
         "output format '{output_format}' is not yet supported (only fasta/nexus)"
     );
     crate::output_path::prepare_output_dir(output_dir)?;
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     crate::parallel::ensure_unique_output_names(files.iter().map(|file| {
         let name = file
             .file_name()
@@ -53,7 +55,8 @@ pub fn run(
         let fname = strip_charset(stem, "_phased");
         let re = Regex::new(&format!("^(_R_)*{}_*", regex::escape(&fname)))?;
 
-        let alignment = load_alignment(&file, input_format)?;
+        let alignment = load_alignment(&file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         let mut file_taxa = HashSet::new();
         let mut rows = Vec::with_capacity(alignment.rows.len());
         for row in alignment.rows {
@@ -71,12 +74,14 @@ pub fn run(
 
         let out_path = output_dir.join(format!("{stem}.{output_format}"));
         if output_format == "fasta" {
-            let mut out = std::fs::File::create(out_path)?;
+            let mut out = std::fs::File::create(&out_path)
+                .with_context(|| format!("creating output file {}", out_path.display()))?;
             for row in &new_alignment.rows {
                 write_fasta_record(&mut out, &row.id, std::str::from_utf8(&row.seq)?)?;
             }
         } else {
-            std::fs::write(out_path, format_nexus(&new_alignment))?;
+            std::fs::write(&out_path, format_nexus(&new_alignment))
+                .with_context(|| format!("writing NEXUS output {}", out_path.display()))?;
         }
         Ok(file_taxa)
     })?;

@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_io::lastz::read_lastz;
 use phyluce_io::twobit::TwoBitFile;
 use regex::Regex;
@@ -151,7 +152,8 @@ pub fn run(
     output_dir: &Path,
     args: &SliceArgs,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output_dir)?;
+    std::fs::create_dir_all(output_dir)
+        .with_context(|| format!("creating output directory {}", output_dir.display()))?;
     let regex_str = args.probe_regex.replace("{}", &args.probe_prefix);
     let regex = Regex::new(&regex_str)?;
 
@@ -163,11 +165,15 @@ pub fn run(
             output_dir,
             &format!("{}.fasta", genome.short_name.to_lowercase()),
         )?;
-        let mut outf = std::fs::File::create(&out_name)?;
+        let mut outf = std::fs::File::create(&out_name)
+            .with_context(|| format!("creating output file {}", out_name.display()))?;
 
-        let tb = TwoBitFile::open(&genome.twobit_path)?;
+        let tb = TwoBitFile::open(&genome.twobit_path).with_context(|| {
+            format!("opening 2bit genome file {}", genome.twobit_path.display())
+        })?;
         let lz_path = lastz_dir.join(&genome.long_name);
-        let matches_list = read_lastz(&lz_path, true)?;
+        let matches_list = read_lastz(&lz_path, true)
+            .with_context(|| format!("reading lastz results {}", lz_path.display()))?;
 
         let mut all_uce_names: HashSet<String> = HashSet::new();
         // uce_name -> contig_name -> Vec<(start, end)>

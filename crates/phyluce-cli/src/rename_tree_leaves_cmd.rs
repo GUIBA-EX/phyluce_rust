@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_genetrees::newick::{parse_all, rename_leaves, reroot_at_leaf_parent, write};
 
 use crate::conf::parse_ini;
@@ -16,7 +17,8 @@ pub fn run(
     order: &str,
     reroot: Option<&str>,
 ) -> anyhow::Result<()> {
-    let conf_text = std::fs::read_to_string(config)?;
+    let conf_text = std::fs::read_to_string(config)
+        .with_context(|| format!("reading config file {}", config.display()))?;
     let sections = parse_ini(&conf_text);
     let entries = sections
         .get(section)
@@ -33,7 +35,8 @@ pub fn run(
             .collect(),
     };
 
-    let tree_text = std::fs::read_to_string(input)?;
+    let tree_text = std::fs::read_to_string(input)
+        .with_context(|| format!("reading tree file {}", input.display()))?;
     let trees = parse_all(&tree_text)?;
     let mut out = String::new();
     for tree in &trees {
@@ -47,6 +50,7 @@ pub fn run(
         out.push_str(&write(&final_tree));
         out.push('\n');
     }
-    std::fs::write(output, out)?;
+    std::fs::write(output, out)
+        .with_context(|| format!("writing renamed trees to {}", output.display()))?;
     Ok(())
 }

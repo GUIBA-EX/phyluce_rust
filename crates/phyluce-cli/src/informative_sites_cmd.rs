@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_align::{nexus::parse_nexus, sites::compute_informative_sites, Alignment};
 use phyluce_io::read_fasta;
 
@@ -77,9 +78,13 @@ pub fn find_alignment_files(dir: &Path, input_format: &str) -> std::io::Result<V
 pub fn load_alignment(path: &Path, input_format: &str) -> anyhow::Result<phyluce_align::Alignment> {
     let format = AlignmentFormat::parse(input_format)?;
     match format {
-        AlignmentFormat::Nexus => Ok(parse_nexus(&std::fs::read_to_string(path)?)?),
+        AlignmentFormat::Nexus => Ok(parse_nexus(
+            &std::fs::read_to_string(path)
+                .with_context(|| format!("reading alignment {}", path.display()))?,
+        )?),
         AlignmentFormat::Fasta => {
-            let records = read_fasta(path)?;
+            let records = read_fasta(path)
+                .with_context(|| format!("reading alignment {}", path.display()))?;
             let alignment =
                 Alignment::from_pairs(records.into_iter().map(|r| (r.id, r.sequence)).collect());
             alignment.validate()?;
@@ -87,12 +92,23 @@ pub fn load_alignment(path: &Path, input_format: &str) -> anyhow::Result<phyluce
         }
         AlignmentFormat::Phylip
         | AlignmentFormat::PhylipRelaxed
-        | AlignmentFormat::PhylipSequential => {
-            parse_phylip(&std::fs::read_to_string(path)?, format)
-        }
-        AlignmentFormat::Clustal => parse_clustal(&std::fs::read_to_string(path)?),
-        AlignmentFormat::Emboss => parse_emboss(&std::fs::read_to_string(path)?),
-        AlignmentFormat::Stockholm => parse_stockholm(&std::fs::read_to_string(path)?),
+        | AlignmentFormat::PhylipSequential => parse_phylip(
+            &std::fs::read_to_string(path)
+                .with_context(|| format!("reading alignment {}", path.display()))?,
+            format,
+        ),
+        AlignmentFormat::Clustal => parse_clustal(
+            &std::fs::read_to_string(path)
+                .with_context(|| format!("reading alignment {}", path.display()))?,
+        ),
+        AlignmentFormat::Emboss => parse_emboss(
+            &std::fs::read_to_string(path)
+                .with_context(|| format!("reading alignment {}", path.display()))?,
+        ),
+        AlignmentFormat::Stockholm => parse_stockholm(
+            &std::fs::read_to_string(path)
+                .with_context(|| format!("reading alignment {}", path.display()))?,
+        ),
     }
 }
 
@@ -287,7 +303,8 @@ pub fn run(
     output: Option<PathBuf>,
     input_format: &str,
 ) -> anyhow::Result<()> {
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     let mut rows: Vec<(String, usize, usize, usize, usize)> = Vec::new();
     for file in &files {
         let name = file
@@ -295,7 +312,8 @@ pub fn run(
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         let length = alignment.nchar();
         let (informative, differences, counted) = compute_informative_sites(&alignment);
         rows.push((name, length, informative, differences, counted));
@@ -308,7 +326,8 @@ pub fn run(
                 "{name},{length},{informative},{differences},{counted}\n"
             ));
         }
-        std::fs::write(out_path, out)?;
+        std::fs::write(&out_path, out)
+            .with_context(|| format!("writing output {}", out_path.display()))?;
     } else {
         crate::cli_info!("locus\tlength\tinformative_sites\tdifferences\tcounted-bases");
         for (name, length, informative, differences, counted) in &rows {

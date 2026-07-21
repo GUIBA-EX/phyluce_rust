@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::{read_fasta, write_fasta_record};
 
 pub fn run(
@@ -12,10 +13,12 @@ pub fn run(
     output_suffix: &str,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(chunk_size > 0, "--chunk-size must be greater than zero");
-    let records = read_fasta(input)?;
+    let records =
+        read_fasta(input).with_context(|| format!("reading input FASTA {}", input.display()))?;
     for (i, batch) in records.chunks(chunk_size).enumerate() {
         let filename = format!("{output_prefix}_{}.{output_suffix}", i + 1);
-        let mut out = std::fs::File::create(&filename)?;
+        let mut out = std::fs::File::create(&filename)
+            .with_context(|| format!("creating output chunk file {filename}"))?;
         for record in batch {
             write_fasta_record(&mut out, &record.description, &record.sequence)?;
         }

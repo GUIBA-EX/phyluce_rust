@@ -3,6 +3,8 @@
 
 use std::path::Path;
 
+use anyhow::Context;
+
 /// Bare `[section]` item-list parser (`allow_no_value=True`-style),
 /// matching the sample-name list this command reads.
 fn read_bare_section(text: &str, section: &str) -> Vec<String> {
@@ -21,7 +23,8 @@ fn glob_sorted(
 ) -> anyhow::Result<Vec<std::path::PathBuf>> {
     let prefix = format!("{sample}_S");
     let suffix = format!("_{read}_");
-    let mut matches: Vec<std::path::PathBuf> = std::fs::read_dir(input_dir)?
+    let mut matches: Vec<std::path::PathBuf> = std::fs::read_dir(input_dir)
+        .with_context(|| format!("reading input directory {}", input_dir.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
@@ -52,9 +55,11 @@ fn merge_read(input_dir: &Path, output: &Path, sample: &str, read: &str) -> anyh
         .to_string_lossy()
         .replace("_L001_", "_L999_");
     let out_path = output.join(&first_name);
-    let mut out = std::fs::File::create(&out_path)?;
+    let mut out = std::fs::File::create(&out_path)
+        .with_context(|| format!("creating merged output {}", out_path.display()))?;
     for infile in &files {
-        let mut input = std::fs::File::open(infile)?;
+        let mut input = std::fs::File::open(infile)
+            .with_context(|| format!("opening input file {}", infile.display()))?;
         std::io::copy(&mut input, &mut out)?;
         crate::cli_info!(
             "\tCopied {} to {}",
@@ -72,8 +77,10 @@ pub fn run(
     section: &str,
     single_end: bool,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output)?;
-    let text = std::fs::read_to_string(config)?;
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("creating output directory {}", output.display()))?;
+    let text = std::fs::read_to_string(config)
+        .with_context(|| format!("reading config {}", config.display()))?;
     let samples = read_bare_section(&text, section);
 
     for sample in &samples {

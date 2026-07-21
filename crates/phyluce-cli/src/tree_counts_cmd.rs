@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_genetrees::newick::{
     bipartitions_polarized_by, leaves, parse, strip_branch_lengths, write, Node,
 };
@@ -42,7 +43,8 @@ pub fn run(
     exclude: &[String],
 ) -> anyhow::Result<()> {
     crate::cli_info!("creating tree objects");
-    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(trees_dir)?
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(trees_dir)
+        .with_context(|| format!("reading trees directory {}", trees_dir.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.is_dir())
@@ -67,7 +69,8 @@ pub fn run(
         if !tree_path.is_file() {
             continue;
         }
-        let text = std::fs::read_to_string(&tree_path)?;
+        let text = std::fs::read_to_string(&tree_path)
+            .with_context(|| format!("reading tree file {}", tree_path.display()))?;
         loci.push(LocusTree {
             gene_name: name,
             tree_text: text,
@@ -113,7 +116,12 @@ pub fn run(
             loci.join("\n")
         ));
     }
-    std::fs::write(locus_support_output, out)?;
+    std::fs::write(locus_support_output, out).with_context(|| {
+        format!(
+            "writing locus support output to {}",
+            locus_support_output.display()
+        )
+    })?;
     Ok(())
 }
 

@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::sql::ident;
 use rusqlite::Connection;
 
@@ -34,7 +35,8 @@ pub fn run(
 ) -> anyhow::Result<()> {
     validate_range(min, max, step)?;
 
-    let conn = Connection::open(db)?;
+    let conn =
+        Connection::open(db).with_context(|| format!("opening locus database {}", db.display()))?;
     let mut stmt = conn.prepare("PRAGMA table_info(matches)")?;
     let all_columns: Vec<String> = stmt
         .query_map([], |row| row.get::<_, String>(1))?

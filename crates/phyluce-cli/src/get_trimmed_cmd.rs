@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_align::trim::{trim_alignment_running, validate_trim_parameters};
 use phyluce_align::{nexus::format_nexus, Alignment};
 use phyluce_io::read_fasta;
@@ -25,7 +26,9 @@ pub fn run(
     crate::output_path::prepare_output_dir(output_dir)?;
 
     let mut files: Vec<PathBuf> = Vec::new();
-    for entry in std::fs::read_dir(alignments_dir)? {
+    for entry in std::fs::read_dir(alignments_dir)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?
+    {
         let path = entry?.path();
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             if FASTA_EXTENSIONS.iter().any(|ext| name.ends_with(ext)) {
@@ -42,7 +45,8 @@ pub fn run(
 
     let results = crate::parallel::try_map_ordered(files, cores, |file| {
         let stem = strip_known_extension(&file);
-        let records = read_fasta(&file)?;
+        let records = read_fasta(&file)
+            .with_context(|| format!("reading alignment file {}", file.display()))?;
         let alignment =
             Alignment::from_pairs(records.into_iter().map(|r| (r.id, r.sequence)).collect());
         alignment.validate()?;
@@ -57,7 +61,8 @@ pub fn run(
         match trimmed {
             Some(aln) => {
                 let out_path = output_dir.join(format!("{stem}.nexus"));
-                std::fs::write(out_path, format_nexus(&aln))?;
+                std::fs::write(&out_path, format_nexus(&aln))
+                    .with_context(|| format!("writing nexus output to {}", out_path.display()))?;
                 Ok(false)
             }
             None => Ok(true),

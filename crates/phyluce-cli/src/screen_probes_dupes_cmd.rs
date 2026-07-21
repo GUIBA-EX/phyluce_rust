@@ -13,6 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::lastz::read_lastz;
 
 fn get_name(header: &str) -> String {
@@ -25,7 +26,8 @@ fn get_name(header: &str) -> String {
 }
 
 pub fn run(lastz_file: &Path) -> anyhow::Result<()> {
-    let matches_list = read_lastz(lastz_file, false)?;
+    let matches_list = read_lastz(lastz_file, false)
+        .with_context(|| format!("reading lastz file {}", lastz_file.display()))?;
     let mut matches: HashMap<String, Vec<String>> = HashMap::new();
     for m in &matches_list {
         matches

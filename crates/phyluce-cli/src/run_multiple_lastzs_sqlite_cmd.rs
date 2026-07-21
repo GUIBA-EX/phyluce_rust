@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use anyhow::Context;
 use phyluce_io::sql::ident;
 use phyluce_io::twobit::TwoBitFile;
 use rusqlite::Connection;
@@ -174,7 +175,12 @@ fn store_species_file(conn: &Connection, genome: &str, cleaned: &Path) -> anyhow
                 identity, percent_identity, continuity, percent_continuity,
                 coverage, percent_coverage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         ))?;
-        for line in BufReader::new(File::open(cleaned)?).lines() {
+        for line in BufReader::new(
+            File::open(cleaned)
+                .with_context(|| format!("opening cleaned lastz output {}", cleaned.display()))?,
+        )
+        .lines()
+        {
             let line = line?;
             let fields: Vec<&str> = line.trim().split('\t').collect();
             anyhow::ensure!(fields.len() == 19, "malformed lastz row: {line:?}");
@@ -362,11 +368,13 @@ fn finalize_genome_file(
     let output =
         crate::output_path::output_file(output_dir, &format!("{probe_name}_v_{genome}.lastz"))?;
     let clean_path = PathBuf::from(format!("{}.clean", output.display()));
-    let mut destination = File::create(&clean_path)?;
+    let mut destination = File::create(&clean_path)
+        .with_context(|| format!("creating cleaned lastz output {}", clean_path.display()))?;
     let mut input_buffer = [0u8; 64 * 1024];
     let mut clean_buffer = Vec::with_capacity(input_buffer.len());
     for temporary in results.iter().flatten() {
-        let mut source = File::open(&temporary.path)?;
+        let mut source = File::open(&temporary.path)
+            .with_context(|| format!("opening lastz unit output {}", temporary.path.display()))?;
         loop {
             let count = source.read(&mut input_buffer)?;
             if count == 0 {
@@ -430,7 +438,8 @@ fn produce_genome_tasks(
     args: &RunMultipleLastzsArgs,
 ) -> anyhow::Result<usize> {
     let target = genome_path(&args.genome_base_path, args.no_dir, genome);
-    let twobit = TwoBitFile::open(&target)?;
+    let twobit = TwoBitFile::open(&target)
+        .with_context(|| format!("opening 2bit genome file {}", target.display()))?;
     let names: Vec<String> = twobit.names().into_iter().map(str::to_string).collect();
 
     if !scaffolds {
@@ -624,7 +633,14 @@ fn align_and_store_all(
                         args.identity,
                         &temporary.path.to_string_lossy(),
                     )?;
-                    let has_results = temporary.path.metadata()?.len() > 0;
+                    let has_results = temporary
+                        .path
+                        .metadata()
+                        .with_context(|| {
+                            format!("checking lastz output size {}", temporary.path.display())
+                        })?
+                        .len()
+                        > 0;
                     event_sender.send(QueueEvent::UnitFinished(UnitResult {
                         genome_index: task.genome_index,
                         unit_index: task.unit_index,
@@ -725,7 +741,8 @@ pub fn run(
         "{} is not a probe file",
         probefile.display()
     );
-    std::fs::create_dir_all(output_dir)?;
+    std::fs::create_dir_all(output_dir)
+        .with_context(|| format!("creating output directory {}", output_dir.display()))?;
     for g in args.chromolist.iter().chain(args.scaffoldlist.iter()) {
         let path = genome_path(&args.genome_base_path, args.no_dir, g);
         anyhow::ensure!(path.is_file(), "{} is not a file", path.display());
@@ -734,7 +751,8 @@ pub fn run(
     let cfg = phyluce_config::PhyluceConfig::load()?;
     let lastz_bin = cfg.get_user_path("binaries", "lastz")?;
 
-    let conn = Connection::open(db)?;
+    let conn = Connection::open(db)
+        .with_context(|| format!("opening lastz results database {}", db.display()))?;
     if !args.append {
         conn.execute(
             "CREATE TABLE species (name TEXT PRIMARY KEY, description TEXT NULL, version TEXT NULL)",

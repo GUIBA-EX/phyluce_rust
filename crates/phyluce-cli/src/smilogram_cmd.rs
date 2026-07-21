@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::Path;
 
+use anyhow::Context;
 use rusqlite::Connection;
 
 use crate::informative_sites_cmd::{find_alignment_files, load_alignment};
@@ -159,12 +160,15 @@ pub fn run(
     input_format: &str,
 ) -> anyhow::Result<()> {
     if output_database.exists() {
-        std::fs::remove_file(output_database)?;
+        std::fs::remove_file(output_database)
+            .with_context(|| format!("removing existing database {}", output_database.display()))?;
     }
-    let conn = Connection::open(output_database)?;
+    let conn = Connection::open(output_database)
+        .with_context(|| format!("opening database {}", output_database.display()))?;
     create_tables(&conn)?;
 
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     // One transaction for every insert below instead of autocommit's
     // implicit per-statement transaction/fsync -- this loop can do a
     // per-(taxon, position) INSERT, so a real dataset (thousands of loci x
@@ -177,7 +181,8 @@ pub fn run(
     for file in &files {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let locus = name.split('.').next().unwrap_or(name).to_string();
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         let seqs: Vec<(String, Vec<u8>)> = alignment
             .rows
             .iter()
@@ -260,7 +265,8 @@ pub fn run(
     }
     tx.commit()?;
 
-    let mut outf = std::fs::File::create(output_file)?;
+    let mut outf = std::fs::File::create(output_file)
+        .with_context(|| format!("creating output file {}", output_file.display()))?;
     writeln!(outf, "substitutions,bp,freq,distance_from_center")?;
     conn.execute_batch(
         "CREATE TEMP TABLE ssb AS
@@ -280,7 +286,8 @@ pub fn run(
         }
     }
 
-    let mut outm = std::fs::File::create(output_missing)?;
+    let mut outm = std::fs::File::create(output_missing)
+        .with_context(|| format!("creating output file {}", output_missing.display()))?;
     writeln!(outm, "substitutions,bp,freq,distance_from_center")?;
     conn.execute_batch(
         "CREATE TEMP TABLE ssc AS

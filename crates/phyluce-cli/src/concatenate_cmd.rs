@@ -7,6 +7,7 @@ use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use anyhow::Context;
 use phyluce_align::concat::{format_sets_block, Charset};
 use phyluce_align::nexus::safename;
 
@@ -65,7 +66,8 @@ fn collect_metadata(
     let mut total_length = 0usize;
 
     for file in files {
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         for row in &alignment.rows {
             if !taxon_index.contains_key(&row.id) {
                 taxon_index.insert(row.id.clone(), taxa.len());
@@ -125,7 +127,8 @@ fn populate_matrix(
     total_length: usize,
 ) -> anyhow::Result<()> {
     for ((file, charset), expected_taxa) in files.iter().zip(charsets).zip(locus_taxa) {
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         let expected_length = charset.stop - charset.start;
         anyhow::ensure!(
             alignment.nchar() == expected_length,
@@ -182,7 +185,10 @@ fn write_phylip(
     taxa: &[String],
     total_length: usize,
 ) -> anyhow::Result<()> {
-    let mut output = BufWriter::new(File::create(path)?);
+    let mut output = BufWriter::new(
+        File::create(path)
+            .with_context(|| format!("creating phylip output file {}", path.display()))?,
+    );
     writeln!(output, "{} {}", taxa.len(), total_length)?;
     for (index, taxon) in taxa.iter().enumerate() {
         write!(output, "{} ", safename(taxon))?;
@@ -206,7 +212,10 @@ fn write_nexus(
         .map(|name| name.chars().count())
         .max()
         .unwrap_or(0);
-    let mut output = BufWriter::new(File::create(path)?);
+    let mut output = BufWriter::new(
+        File::create(path)
+            .with_context(|| format!("creating nexus output file {}", path.display()))?,
+    );
     writeln!(output, "#NEXUS\nbegin data;")?;
     writeln!(
         output,
@@ -241,9 +250,11 @@ pub fn run(
         as_nexus != as_phylip,
         "exactly one of --nexus or --phylip is required"
     );
-    crate::output_path::prepare_output_dir(output_dir)?;
+    crate::output_path::prepare_output_dir(output_dir)
+        .with_context(|| format!("preparing output directory {}", output_dir.display()))?;
 
-    let mut files = find_alignment_files(alignments_dir, input_format)?;
+    let mut files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     files.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
     let metadata = collect_metadata(&files, input_format)?;
     let mut scratch = create_scratch_matrix()?;
@@ -273,10 +284,9 @@ pub fn run(
             &metadata.taxa,
             metadata.total_length,
         )?;
-        std::fs::write(
-            output_dir.join(format!("{output_name}.charsets")),
-            format_sets_block(&metadata.charsets),
-        )?;
+        let charsets_path = output_dir.join(format!("{output_name}.charsets"));
+        std::fs::write(&charsets_path, format_sets_block(&metadata.charsets))
+            .with_context(|| format!("writing charsets file {}", charsets_path.display()))?;
     } else {
         write_nexus(
             &output_dir.join(format!("{output_name}.nexus")),

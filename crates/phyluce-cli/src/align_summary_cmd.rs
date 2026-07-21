@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_align::summary::compute_align_summary;
 
 use crate::informative_sites_cmd::{find_alignment_files, load_alignment};
@@ -17,7 +18,8 @@ fn summarize_file(file: PathBuf, input_format: &str) -> anyhow::Result<SummaryRo
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();
-    let alignment = load_alignment(&file, input_format)?;
+    let alignment = load_alignment(&file, input_format)
+        .with_context(|| format!("loading alignment {}", file.display()))?;
     let summary = compute_align_summary(&alignment);
     let denominator = alignment.ntax() * alignment.nchar();
     let missing = if denominator == 0 {
@@ -44,7 +46,8 @@ pub fn run(
     cores: usize,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(cores > 0, "--cores must be greater than zero");
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     anyhow::ensure!(!files.is_empty(), "no {input_format} alignments found");
     let rows = summarize_files(files, input_format, cores)?;
 
@@ -70,7 +73,9 @@ pub fn run(
                 s.char_count(b'T'),
             ));
         }
-        std::fs::write(out_path, out)?;
+        std::fs::write(&out_path, out).with_context(|| {
+            format!("writing alignment summary stats to {}", out_path.display())
+        })?;
     }
     Ok(())
 }

@@ -27,7 +27,8 @@ pub fn run(
     let cfg = PhyluceConfig::load()?;
     let trimal_bin = cfg.get_user_path("binaries", "trimal")?;
 
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     crate::parallel::ensure_unique_output_names(files.iter().map(|file| {
         let name = file
             .file_name()
@@ -56,7 +57,8 @@ pub fn run(
         // directory.
         let trimmed_path = std::path::PathBuf::from(format!("{}-trimal", file.display()));
         let result = (|| -> anyhow::Result<Option<String>> {
-            crate::output_path::remove_stale_file(&trimmed_path)?;
+            crate::output_path::remove_stale_file(&trimmed_path)
+                .with_context(|| format!("removing stale trimAl output for locus {name}"))?;
             let output = std::process::Command::new(&trimal_bin)
                 .arg("-in")
                 .arg(&file)
@@ -75,7 +77,8 @@ pub fn run(
             if !trimmed_path.is_file() {
                 anyhow::bail!("trimAl did not create output for locus {name}");
             }
-            let records = read_fasta(&trimmed_path)?;
+            let records = read_fasta(&trimmed_path)
+                .with_context(|| format!("reading trimAl output for locus {name}"))?;
             if records.is_empty() {
                 return Ok(Some(format!("Missing information for locus {name}")));
             }
@@ -87,7 +90,8 @@ pub fn run(
             let ext = output_format;
             let out_path = output_dir.join(format!("{name}.{ext}"));
             if output_format == "fasta" {
-                let mut out = std::fs::File::create(out_path)?;
+                let mut out = std::fs::File::create(&out_path)
+                    .with_context(|| format!("creating output file {}", out_path.display()))?;
                 for row in &trimmed.rows {
                     phyluce_io::write_fasta_record(
                         &mut out,
@@ -96,7 +100,8 @@ pub fn run(
                     )?;
                 }
             } else {
-                std::fs::write(out_path, format_nexus(&trimmed))?;
+                std::fs::write(&out_path, format_nexus(&trimmed))
+                    .with_context(|| format!("writing nexus output to {}", out_path.display()))?;
             }
             Ok(None)
         })();

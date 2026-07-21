@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write as _;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::lastz::read_lastz;
 use regex::Regex;
 
@@ -48,15 +49,19 @@ fn write_bed_line(
 
 /// Mirrors `phyluce_probe_get_probe_bed_from_lastz_files`.
 pub fn run_probe_bed(alignments: &Path, output: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output)?;
-    for file in find_lastz_files(alignments)? {
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("creating output directory {}", output.display()))?;
+    for file in find_lastz_files(alignments)
+        .with_context(|| format!("reading lastz directory {}", alignments.display()))?
+    {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let Some(outname) = outname_from_filename(name) else {
             continue;
         };
         crate::cli_info!("Working on {outname}");
 
-        let matches = read_lastz(&file, true)?;
+        let matches = read_lastz(&file, true)
+            .with_context(|| format!("reading lastz file {}", file.display()))?;
         let mut probes: HashMap<String, Vec<(String, i64, i64)>> = HashMap::new();
         for m in &matches {
             let probe = m.name2.split('|').next().unwrap_or("").trim().to_string();
@@ -67,7 +72,8 @@ pub fn run_probe_bed(alignments: &Path, output: &Path) -> anyhow::Result<()> {
         }
 
         let out_path = output.join(format!("{outname}.probe.bed"));
-        let mut out = std::fs::File::create(out_path)?;
+        let mut out = std::fs::File::create(&out_path)
+            .with_context(|| format!("creating output file {}", out_path.display()))?;
         writeln!(
             out,
             "track name=\"uce-v-{outname}\" description=\"UCE probe matches to {outname}\" visibility=2 itemRgb=\"On\""
@@ -91,17 +97,21 @@ pub fn run_probe_bed(alignments: &Path, output: &Path) -> anyhow::Result<()> {
 
 /// Mirrors `phyluce_probe_get_locus_bed_from_lastz_files`.
 pub fn run_locus_bed(alignments: &Path, output: &Path, regex_str: &str) -> anyhow::Result<()> {
-    std::fs::create_dir_all(output)?;
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("creating output directory {}", output.display()))?;
     let regex = Regex::new(regex_str)?;
 
-    for file in find_lastz_files(alignments)? {
+    for file in find_lastz_files(alignments)
+        .with_context(|| format!("reading lastz directory {}", alignments.display()))?
+    {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let Some(outname) = outname_from_filename(name) else {
             continue;
         };
         crate::cli_info!("Working on {outname}");
 
-        let matches = read_lastz(&file, true)?;
+        let matches = read_lastz(&file, true)
+            .with_context(|| format!("reading lastz file {}", file.display()))?;
         // locus -> chromo -> positions
         let mut loci: HashMap<String, HashMap<String, Vec<i64>>> = HashMap::new();
         for m in &matches {
@@ -121,7 +131,8 @@ pub fn run_locus_bed(alignments: &Path, output: &Path, regex_str: &str) -> anyho
         }
 
         let out_path = output.join(format!("{outname}.bed"));
-        let mut out = std::fs::File::create(out_path)?;
+        let mut out = std::fs::File::create(&out_path)
+            .with_context(|| format!("creating output file {}", out_path.display()))?;
         writeln!(
             out,
             "track name=\"uce-v-{outname}\" description=\"UCE locus matches to {outname}\" visibility=2 itemRgb=\"On\""

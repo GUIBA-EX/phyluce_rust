@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use phyluce_align::concat::{concatenate, format_sets_block};
 use phyluce_align::nexus::format_nexus_with_interleave;
 
@@ -51,8 +52,10 @@ pub fn run(
     sample_size: usize,
     replicates: usize,
 ) -> anyhow::Result<()> {
-    crate::output_path::prepare_output_dir(output_dir)?;
-    let mut files: Vec<PathBuf> = std::fs::read_dir(alignments_dir)?
+    crate::output_path::prepare_output_dir(output_dir)
+        .with_context(|| format!("preparing output directory {}", output_dir.display()))?;
+    let mut files: Vec<PathBuf> = std::fs::read_dir(alignments_dir)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
@@ -78,7 +81,8 @@ pub fn run(
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
-            let alignment = load_alignment(file, "nexus")?;
+            let alignment = load_alignment(file, "nexus")
+                .with_context(|| format!("loading alignment {}", file.display()))?;
             loaded.push((name, alignment));
         }
         let (combined, charsets) = concatenate(&loaded);
@@ -86,7 +90,9 @@ pub fn run(
         text.push_str(&format_sets_block(&charsets));
 
         let align_name = format!("random-sample-{i}_{sample_size}-loci.nex");
-        std::fs::write(output_dir.join(align_name), text)?;
+        let align_path = output_dir.join(align_name);
+        std::fs::write(&align_path, text)
+            .with_context(|| format!("writing sampled alignment {}", align_path.display()))?;
     }
     Ok(())
 }

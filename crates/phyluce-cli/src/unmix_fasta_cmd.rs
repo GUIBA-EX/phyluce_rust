@@ -4,10 +4,11 @@
 use std::io::Write as _;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::FastaRecord;
 
 fn read_fasta_records(path: &Path) -> anyhow::Result<Vec<FastaRecord>> {
-    Ok(phyluce_io::read_fasta(path)?)
+    phyluce_io::read_fasta(path).with_context(|| format!("reading fasta {}", path.display()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -37,12 +38,20 @@ pub fn run(
     // sort by id, matching `sorted(seq_dict.keys())`
     records.sort_by(|a, b| a.id.cmp(&b.id));
 
-    let mut out_r1_f = std::fs::File::create(out_r1)?;
-    let mut out_r2_f = std::fs::File::create(out_r2)?;
-    let mut out_rs_f = std::fs::File::create(out_r_singleton)?;
+    let mut out_r1_f = std::fs::File::create(out_r1)
+        .with_context(|| format!("creating R1 output file {}", out_r1.display()))?;
+    let mut out_r2_f = std::fs::File::create(out_r2)
+        .with_context(|| format!("creating R2 output file {}", out_r2.display()))?;
+    let mut out_rs_f = std::fs::File::create(out_r_singleton).with_context(|| {
+        format!(
+            "creating singleton output file {}",
+            out_r_singleton.display()
+        )
+    })?;
 
     if let Some(singleton) = singleton_reads {
-        let contents = std::fs::read_to_string(singleton)?;
+        let contents = std::fs::read_to_string(singleton)
+            .with_context(|| format!("reading singleton reads {}", singleton.display()))?;
         out_rs_f.write_all(contents.as_bytes())?;
     }
 

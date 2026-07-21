@@ -23,7 +23,8 @@ fn get_input_data(
     dir: Option<&Path>,
 ) -> anyhow::Result<Vec<(String, PathBuf)>> {
     if let Some(config) = config {
-        let text = std::fs::read_to_string(config)?;
+        let text = std::fs::read_to_string(config)
+            .with_context(|| format!("reading config {}", config.display()))?;
         let sections = crate::conf::parse_ini(&text);
         let entries = sections
             .get("samples")
@@ -41,7 +42,9 @@ fn get_input_data(
             .collect()
     } else if let Some(dir) = dir {
         let mut groups = Vec::new();
-        for entry in std::fs::read_dir(dir)? {
+        for entry in
+            std::fs::read_dir(dir).with_context(|| format!("reading dir {}", dir.display()))?
+        {
             let path = entry?.path();
             let name = path.file_name().unwrap().to_string_lossy().to_string();
             groups.push((name, path));
@@ -63,7 +66,8 @@ fn shellexpand_home(path: &str) -> String {
 }
 
 fn cleanup_assembly_directory(dir: &Path) -> anyhow::Result<()> {
-    let names: Vec<String> = std::fs::read_dir(dir)?
+    let names: Vec<String> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading assembly dir {}", dir.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
         .collect();
@@ -74,7 +78,9 @@ fn cleanup_assembly_directory(dir: &Path) -> anyhow::Result<()> {
         crate::cli_warn!("Expected assembly files were not found in output.");
         return Ok(());
     }
-    for entry in std::fs::read_dir(dir)? {
+    for entry in
+        std::fs::read_dir(dir).with_context(|| format!("reading assembly dir {}", dir.display()))?
+    {
         let path = entry?.path();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         if !matches!(
@@ -82,9 +88,11 @@ fn cleanup_assembly_directory(dir: &Path) -> anyhow::Result<()> {
             "scaffolds.fasta" | "contigs.fasta" | "spades.log"
         ) {
             if path.is_dir() {
-                std::fs::remove_dir_all(&path)?;
+                std::fs::remove_dir_all(&path)
+                    .with_context(|| format!("removing directory {}", path.display()))?;
             } else {
-                std::fs::remove_file(&path)?;
+                std::fs::remove_file(&path)
+                    .with_context(|| format!("removing file {}", path.display()))?;
             }
         }
     }
@@ -152,17 +160,21 @@ pub fn run(
     })?;
     let cov_cutoff = cfg.get_user_param("spades", "cov_cutoff").unwrap_or("5");
 
-    std::fs::create_dir_all(output)?;
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("creating output directory {}", output.display()))?;
     let contig_dir = output.join("contigs");
-    std::fs::create_dir_all(&contig_dir)?;
+    std::fs::create_dir_all(&contig_dir)
+        .with_context(|| format!("creating contigs directory {}", contig_dir.display()))?;
 
     let input_data = get_input_data(config, dir)?;
     for (sample, sample_input_dir) in &input_data {
         crate::cli_info!("Processing {sample}");
         let sample_dir = crate::output_path::output_file(output, &format!("{sample}_spades"))?;
-        std::fs::create_dir_all(&sample_dir)?;
+        std::fs::create_dir_all(&sample_dir)
+            .with_context(|| format!("creating sample directory {}", sample_dir.display()))?;
 
-        let reads = get_input_files(sample_input_dir, subfolder)?;
+        let reads = get_input_files(sample_input_dir, subfolder)
+            .with_context(|| format!("reading input reads from {}", sample_input_dir.display()))?;
         match (&reads.r1, &reads.r2) {
             (Some(r1), Some(r2)) => {
                 crate::cli_info!("Running SPAdes for PE data");

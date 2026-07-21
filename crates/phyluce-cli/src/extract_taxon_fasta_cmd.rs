@@ -4,6 +4,7 @@
 use std::io::Write;
 use std::path::Path;
 
+use anyhow::Context;
 use phyluce_io::write_fasta_record;
 
 use crate::informative_sites_cmd::{find_alignment_files, load_alignment};
@@ -14,14 +15,17 @@ pub fn run(
     output: &Path,
     input_format: &str,
 ) -> anyhow::Result<()> {
-    let files = find_alignment_files(alignments_dir, input_format)?;
+    let files = find_alignment_files(alignments_dir, input_format)
+        .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     print!("Running");
     std::io::stdout().flush().ok();
-    let mut outf = std::fs::File::create(output)?;
+    let mut outf = std::fs::File::create(output)
+        .with_context(|| format!("creating output file {}", output.display()))?;
     for file in &files {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let locus = name.split('.').next().unwrap_or(name);
-        let alignment = load_alignment(file, input_format)?;
+        let alignment = load_alignment(file, input_format)
+            .with_context(|| format!("loading alignment {}", file.display()))?;
         for row in &alignment.rows {
             if row.id != taxon {
                 continue;

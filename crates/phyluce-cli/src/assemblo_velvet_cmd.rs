@@ -38,8 +38,12 @@ fn run_velveth(velveth: &str, kmer: u32, reads: &ReadSet, output: &Path) -> anyh
     if let Some(s) = &reads.singleton {
         cmd.arg("-short").arg(s);
     }
-    let out = std::fs::File::create(output.join(format!("velveth-k{kmer}.out.log")))?;
-    let err = std::fs::File::create(output.join(format!("velveth-k{kmer}.err.log")))?;
+    let velveth_out_log = output.join(format!("velveth-k{kmer}.out.log"));
+    let out = std::fs::File::create(&velveth_out_log)
+        .with_context(|| format!("creating velveth stdout log {}", velveth_out_log.display()))?;
+    let velveth_err_log = output.join(format!("velveth-k{kmer}.err.log"));
+    let err = std::fs::File::create(&velveth_err_log)
+        .with_context(|| format!("creating velveth stderr log {}", velveth_err_log.display()))?;
     cmd.stdout(out).stderr(err);
     let status = cmd.status().context("running velveth")?;
     anyhow::ensure!(status.success(), "velveth failed: {status}");
@@ -57,8 +61,12 @@ fn run_velvetg(velvetg: &str, kmer: u32, output: &Path) -> anyhow::Result<PathBu
         .arg("auto")
         .arg("-min_contig_lgth")
         .arg("100");
-    let out = std::fs::File::create(output.join(format!("velvetg-k{kmer}.out.log")))?;
-    let err = std::fs::File::create(output.join(format!("velvetg-k{kmer}.err.log")))?;
+    let velvetg_out_log = output.join(format!("velvetg-k{kmer}.out.log"));
+    let out = std::fs::File::create(&velvetg_out_log)
+        .with_context(|| format!("creating velvetg stdout log {}", velvetg_out_log.display()))?;
+    let velvetg_err_log = output.join(format!("velvetg-k{kmer}.err.log"));
+    let err = std::fs::File::create(&velvetg_err_log)
+        .with_context(|| format!("creating velvetg stderr log {}", velvetg_err_log.display()))?;
     cmd.stdout(out).stderr(err);
     let status = cmd.status().context("running velvetg")?;
     anyhow::ensure!(status.success(), "velvetg failed: {status}");
@@ -67,7 +75,9 @@ fn run_velvetg(velvetg: &str, kmer: u32, output: &Path) -> anyhow::Result<PathBu
 
 fn cleanup_velvet_assembly_folder(output: &Path) -> anyhow::Result<()> {
     let keep = ["contigs.fa", "stats.txt"];
-    for entry in std::fs::read_dir(output)? {
+    for entry in std::fs::read_dir(output)
+        .with_context(|| format!("reading velvet assembly folder {}", output.display()))?
+    {
         let path = entry?.path();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         if !keep.contains(&name.as_str()) {
@@ -108,17 +118,21 @@ pub fn run(
         anyhow::anyhow!("Cannot find velvetg. Ensure it is installed and in your $PATH")
     })?;
 
-    std::fs::create_dir_all(output)?;
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("creating output directory {}", output.display()))?;
     let contig_dir = output.join("contigs");
-    std::fs::create_dir_all(&contig_dir)?;
+    std::fs::create_dir_all(&contig_dir)
+        .with_context(|| format!("creating contigs directory {}", contig_dir.display()))?;
 
     let input_data = get_input_data(config, dir)?;
     for (sample, sample_input_dir) in &input_data {
         crate::cli_info!("Processing {sample}");
         let sample_dir = crate::output_path::output_file(output, sample)?;
-        std::fs::create_dir_all(&sample_dir)?;
+        std::fs::create_dir_all(&sample_dir)
+            .with_context(|| format!("creating sample directory {}", sample_dir.display()))?;
 
-        let reads = get_input_files(sample_input_dir, subfolder)?;
+        let reads = get_input_files(sample_input_dir, subfolder)
+            .with_context(|| format!("reading input reads from {}", sample_input_dir.display()))?;
         let mut assembly_dir = sample_dir.clone();
         if reads.r1.is_some() && reads.r2.is_some() {
             run_velveth(&velveth, kmer, &reads, &sample_dir)?;
