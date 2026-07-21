@@ -13,7 +13,7 @@
 | --- | --- |
 | 第一次运行 | [构建与安装](user-manual-zh.md#2-构建与安装) -> [配置外部程序](user-manual-zh.md#3-配置外部程序) -> [端到端示例](user-manual-zh.md#17-端到端最小示例) |
 | 从原版脚本迁移 | [命令形式](user-manual-zh.md#1-命令形式) -> [旧脚本名兼容](user-manual-zh.md#5-原版脚本名兼容) -> [已知差异](user-manual-zh.md#14-已知差异) |
-| 查询具体命令 | [UCE 主流程](user-manual-zh.md#6-uce-主流程) -> [Alignment 工作流](user-manual-zh.md#7-alignment-工作流) -> 其他命令域 |
+| 查询具体命令 | [命令速查表](command-reference-zh.md)（按命令域列出全部命令和一句话说明）-> [UCE 主流程](user-manual-zh.md#6-uce-主流程) -> [Alignment 工作流](user-manual-zh.md#7-alignment-工作流) |
 | 开发和验证 | [项目 README](../README.md#开发检查) -> [兼容性测试](user-manual-zh.md#16-兼容性测试) |
 
 ## 文档地图
@@ -21,6 +21,10 @@
 - [README](../README.md)：项目结构、主要实现变化和开发检查。
 - [中文用户手册](user-manual-zh.md)：安装、配置、完整流程、全部命令域、
   故障排查和复现建议。
+- [命令速查表](command-reference-zh.md)：按命令域列出全部 74 个命令（新旧
+  名字对照 + 一句话说明），参照
+  [原版 List of Programs](https://phyluce.readthedocs.io/en/latest/daily-use/list-of-programs.html)
+  整理。
 - [旧命令兼容说明](../rust-command-compatibility.md)：旧脚本名映射、日志和
   迁移边界。
 - [许可证](../LICENSE)：本项目的软件许可条款。
