@@ -8,7 +8,7 @@ authors:
   - family-names: Xia
     given-names: Fei
 repository-code: "https://github.com/GUIBA-EX/phyluce_rust"
-license: BSD-3-Clause
+license: GPL-3.0-or-later
 references:
   - type: article
     title: "PHYLUCE is a software package for the analysis of conserved genomic loci"

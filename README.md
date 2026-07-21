@@ -103,9 +103,10 @@ python3 tests/compat/run_fixtures.py target/debug/phyluce
 
 ## 版权与引用
 
-本仓库（Rust 移植版本）的著作权归 GUIBA-EX 所有；原版 Python `phyluce` 的著作权
-归 Brant C. Faircloth 所有——具体条款见 [LICENSE](LICENSE)（BSD-3-Clause，
-保留原作者版权声明）。
+本仓库（Rust 移植版本）的著作权归 GUIBA-EX 所有，采用 **GPLv3
+（GPL-3.0-or-later）** 许可；原版 Python `phyluce` 的著作权归 Brant C.
+Faircloth 所有（BSD-3-Clause）——原始版权声明按其许可证要求保留在
+[LICENSE](LICENSE) 文件中。
 
 如在论文中使用本软件，请引用本仓库；对应的 bioRxiv 预印本正在准备中，发布后
 会更新此处的引用信息。机器可读的引用元数据见 [CITATION.cff](CITATION.cff)。
