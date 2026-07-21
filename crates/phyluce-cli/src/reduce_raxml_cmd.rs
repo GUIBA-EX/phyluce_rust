@@ -1,7 +1,5 @@
 //! CLI wiring for `phyluce align reduce-alignments-with-raxml`, mirroring
 //! `phyluce_align_reduce_alignments_with_raxml`.
-//!
-//! Untested: `raxmlHPC-SSE3` isn't installed in this environment.
 
 use std::path::Path;
 

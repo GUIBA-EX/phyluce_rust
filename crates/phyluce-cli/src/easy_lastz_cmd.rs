@@ -1,8 +1,5 @@
 //! CLI wiring for `phyluce probe easy-lastz`, mirroring
 //! `phyluce_probe_easy_lastz`.
-//!
-//! Untested: `lastz` isn't installed in this environment. See
-//! `lastz_align` docs.
 
 use std::path::Path;
 

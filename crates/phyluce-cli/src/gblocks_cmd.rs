@@ -1,10 +1,13 @@
 //! CLI wiring for `phyluce align get-gblocks-trimmed-alignments-from-untrimmed`,
 //! mirroring `phyluce_align_get_gblocks_trimmed_alignments_from_untrimmed`.
 //!
-//! Untested against a live Gblocks binary in this environment (not
-//! installed/available on Apple Silicon per the legacy script's own
-//! platform check) -- ported carefully from source, but treat as
-//! best-effort until validated against a real run.
+//! Gblocks only reads FASTA/NBRF-PIR, not NEXUS/PHYLIP/CLUSTAL/EMBOSS/
+//! Stockholm -- true of the legacy Python script too (it hands Gblocks the
+//! raw `--input-format` file unconverted, so `--input-format nexus` fails
+//! there exactly the same way). Since the alignment is already parsed into
+//! memory regardless of `--input-format`, this writes a temporary FASTA
+//! copy for Gblocks to read instead of the original file, so every
+//! `--input-format` this command accepts actually works with it.
 
 use std::path::Path;
 
@@ -66,14 +69,27 @@ pub fn run(
             b2_arg = b1_arg;
         }
 
+        // Gblocks only reads FASTA/NBRF-PIR; write out the already-parsed
+        // alignment as a temporary FASTA copy so `--input-format nexus`
+        // (etc.) works instead of handing Gblocks a file format it can't
+        // read (see the module doc comment).
+        let gblocks_input = output_dir.join(format!(".{name}.gblocks-input.fasta"));
+        {
+            let mut tmp = std::fs::File::create(&gblocks_input)
+                .with_context(|| format!("creating Gblocks FASTA input for locus {name}"))?;
+            for row in &alignment.rows {
+                phyluce_io::write_fasta_record(&mut tmp, &row.id, std::str::from_utf8(&row.seq)?)?;
+            }
+        }
+
         // Gblocks writes beside the input using a fixed `-gb` suffix. Remove
         // any prior result so a failed invocation cannot be mistaken for a
         // successful current run.
-        let trimmed_path = std::path::PathBuf::from(format!("{}-gb", file.display()));
+        let trimmed_path = std::path::PathBuf::from(format!("{}-gb", gblocks_input.display()));
         crate::output_path::remove_stale_file(&trimmed_path)?;
 
         let output = std::process::Command::new(&gblocks_bin)
-            .arg(&file)
+            .arg(&gblocks_input)
             .arg("-t=DNA")
             .arg(format!("-b1={b1_arg}"))
             .arg(format!("-b2={b2_arg}"))
@@ -82,7 +98,9 @@ pub fn run(
             .arg("-b5=h")
             .arg("-p=n")
             .output()
-            .with_context(|| format!("running Gblocks for locus {name}"))?;
+            .with_context(|| format!("running Gblocks for locus {name}"));
+        std::fs::remove_file(&gblocks_input).ok();
+        let output = output?;
         // Gblocks conventionally exits non-zero even on success; the
         // legacy script never checks the exit code, only whether the
         // `-gb` output file exists afterward.

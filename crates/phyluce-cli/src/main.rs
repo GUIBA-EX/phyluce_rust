@@ -470,8 +470,7 @@ enum ProbeAction {
         #[arg(long, required_unless_present = "flank", conflicts_with = "flank")]
         probes: Option<i64>,
     },
-    /// Equivalent to `phyluce_probe_easy_lastz`. Untested: `lastz` isn't
-    /// installed in this environment -- see `lastz_align` docs.
+    /// Equivalent to `phyluce_probe_easy_lastz`.
     EasyLastz {
         #[arg(long)]
         target: PathBuf,
@@ -496,8 +495,7 @@ enum ProbeAction {
     /// (`<index-prefix>.stidx`/`.sthash`) already exists, so mapping many
     /// samples against the same reference only pays the indexing cost
     /// once; pass `--force-rebuild-index` to rebuild anyway (e.g. after
-    /// changing `--genome-files`). Untested: `probebwa` isn't installed in
-    /// this environment -- see `probebwa_align` docs.
+    /// changing `--genome-files`).
     EasyStampy {
         #[arg(long)]
         species: String,
@@ -1211,7 +1209,6 @@ enum AlignAction {
         cores: usize,
     },
     /// Equivalent to `phyluce_align_get_gblocks_trimmed_alignments_from_untrimmed`.
-    /// Untested against a live Gblocks binary in this environment.
     GetGblocksTrimmedAlignmentsFromUntrimmed {
         #[arg(long)]
         alignments: PathBuf,
@@ -1233,7 +1230,6 @@ enum AlignAction {
         cores: usize,
     },
     /// Equivalent to `phyluce_align_get_trimal_trimmed_alignments_from_untrimmed`.
-    /// Untested against a live trimAl binary in this environment.
     GetTrimalTrimmedAlignmentsFromUntrimmed {
         #[arg(long)]
         alignments: PathBuf,
@@ -1366,7 +1362,6 @@ enum AlignAction {
         replicates: usize,
     },
     /// Equivalent to `phyluce_align_reduce_alignments_with_raxml`.
-    /// Untested: `raxmlHPC-SSE3` isn't installed in this environment.
     ReduceAlignmentsWithRaxml {
         #[arg(long)]
         alignments: PathBuf,

@@ -1,9 +1,5 @@
 //! CLI wiring for `phyluce align get-trimal-trimmed-alignments-from-untrimmed`,
 //! mirroring `phyluce_align_get_trimal_trimmed_alignments_from_untrimmed`.
-//!
-//! Untested against a live trimAl binary in this environment (not
-//! installed) -- ported carefully from source, treat as best-effort until
-//! validated against a real run.
 
 use std::path::Path;
 
