@@ -83,26 +83,22 @@ phyluce align convert-degen-bases
 - 扩展兼容性测试，优先使用已有 fixture，随机、外部工具或历史兼容问题路径
   保留合成 smoke test。
 - `merge-multiple-gzip-files --trimmed` 和 `rename-tree-leaves --reroot`
-  已实现（此前明确报错未实现）。`--trimmed` 复用 `phyluce-assembly::raw_reads`
-  的 R1/R2/singleton 文件发现逻辑，按 `<output>/<name>/split-adapter-quality-trimmed/`
-  目录结构合并；`--reroot` 在 `phyluce-genetrees::newick` 中实现了
-  edge-by-edge 的祖先链反转（reroot at a leaf's parent），语义与 DendroPy 的
-  `tree.reroot_at_node` 一致。
+  已实现（此前明确报错未实现）。`--reroot` 语义对齐 DendroPy 的
+  `tree.reroot_at_node`，并正确压缩重新生根过程中产生的退化单子节点。
 - 新增 `probe easy-stampy`：用 [probebwa](https://github.com/GUIBA-EX/probebwa)
   （stampy 算法的 Rust 复刻，CLI 兼容）替代教程里手动调用的 `stampy.py`，
-  一条命令依次跑通 `build-genome` → `build-hash` → `map`，`--bam` 时直接产出
-  BAM（无需再手动 `samtools view`）。`probebwa` 二进制路径在 `phyluce.conf`
-  的 `[binaries]` 段配置。
+  一条命令依次跑通 `build-genome` → `build-hash` → `map`；索引文件已存在时
+  自动跳过对应构建步骤（`--force-rebuild-index` 强制重建），`--bam` 时直接
+  产出 BAM。二进制路径在 `phyluce.conf` 的 `[binaries]` 段配置。
 - `match-contigs-to-probes` 的 contig/probe 名称提取新增手写扫描快路径
-  （`phyluce-assembly::fast_extract`），仅在 `--regex`/`[headers]`
-  与内置默认值字节完全一致、且输入为 ASCII 时启用；命中默认配置时端到端约
-  2.7x 提速（30 万行 LASTZ 记录基准：约 175ms → 约 63ms）。任何自定义正则
-  都继续走原有的通用正则路径，快路径不匹配时总会回落到正则确认，不会独立
-  报错，因此该模块的 bug 最多只影响性能，不影响匹配结果的正确性——已用
-  差分模糊测试（`fast_extract_*_matches_regex_oracle`，8 组随机种子 ×
-  合法/边界/垃圾/非 ASCII 输入）验证。同一批基准也验证过换用 `ahash`
-  替代标准库 `HashMap`/`HashSet` 本身收益很小（~10% 的耗时在哈希上，端到端
-  提升在噪声范围内），真正的瓶颈是正则匹配，不是哈希。
+  （`phyluce-assembly::fast_extract`），命中内置默认 `--regex`/`[headers]`
+  时端到端约 2.7x 提速；自定义正则或快路径不匹配时始终安全回落到通用正则，
+  已用差分模糊测试验证正确性。
+- 性能相关的架构改动：`[profile.release]` 开启 LTO/单 codegen-unit，
+  `phyluce-cli` 换用 `mimalloc`；`parallel.rs` 的并发调度从手撸线程池换成
+  `rayon`（实测 ~1.8-4.4x）；`concatenate`/`format-concatenated-phylip-for-paml`
+  的 taxon 匹配从 O(n²) 线性扫描改成哈希查找；三处逐行 SQLite INSERT 补上
+  显式事务（单条约 700x）。
 
 ## 已知差异
 

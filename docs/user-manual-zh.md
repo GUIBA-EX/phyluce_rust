@@ -1208,10 +1208,12 @@ phyluce probe easy-stampy \
 ```
 
 `--reads` 传一个文件是单端，传两个（mate1 mate2）是双端。`--bam` 时
-`probebwa` 直接写 BAM，不用再手动 `samtools view` 转换。`probebwa` 二进制
-路径通过 `phyluce.conf` 的 `[binaries] probebwa` 配置。`probebwa` 目前只在
-E. coli 规模的真实数据上跟 stampy-old 验证过，尚未在人类等染色体级基因组
-上测试，大基因组场景请先自行验证。
+`probebwa` 直接写 BAM，不用再手动 `samtools view` 转换。`--index-prefix`
+指向的 `.stidx`/`.sthash` 已存在时会自动跳过对应的建索引步骤，方便同一
+基因组比对多个样本；需要重建时传 `--force-rebuild-index`。`probebwa`
+二进制路径通过 `phyluce.conf` 的 `[binaries] probebwa` 配置。`probebwa`
+目前只在 E. coli 规模的真实数据上跟 stampy-old 验证过，尚未在人类等
+染色体级基因组上测试，大基因组场景请先自行验证。
 
 ## 9. Utilities 命令
 
