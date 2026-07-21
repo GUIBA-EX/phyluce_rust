@@ -40,9 +40,9 @@ ahash = "0.8"
 anyhow = "1"
 thiserror = "1"
 clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
 flate2 = "1"
 regex = "1"
 csv = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
+rusqlite = { version = "0.40.1", features = ["bundled"] }

@@ -21,7 +21,7 @@ phyluce-external = { path = "../phyluce-external" }
 phyluce-assembly = { path = "../phyluce-assembly" }
 phyluce-align = { path = "../phyluce-align" }
 phyluce-genetrees = { path = "../phyluce-genetrees" }
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { workspace = true }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 mimalloc = "0.1"

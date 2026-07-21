@@ -12,7 +12,7 @@ thiserror = { workspace = true }
 regex = { workspace = true }
 phyluce-io = { path = "../phyluce-io" }
 phyluce-config = { path = "../phyluce-config" }
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { workspace = true }
 
 [dev-dependencies]
 rustc-hash = "2.1"
