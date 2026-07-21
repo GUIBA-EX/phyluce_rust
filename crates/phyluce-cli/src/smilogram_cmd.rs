@@ -165,6 +165,15 @@ pub fn run(
     create_tables(&conn)?;
 
     let files = find_alignment_files(alignments_dir, input_format)?;
+    // One transaction for every insert below instead of autocommit's
+    // implicit per-statement transaction/fsync -- this loop can do a
+    // per-(taxon, position) INSERT, so a real dataset (thousands of loci x
+    // tens of taxa x several variant positions each) can easily reach
+    // hundreds of thousands of individual statements. At the ~700x-slower
+    // rate measured for autocommit in `multi_fasta_table_cmd::tests::
+    // bench_sqlite_insert_autocommit_vs_one_transaction`, that's the
+    // difference between sub-second and (extrapolated) many minutes.
+    let tx = conn.unchecked_transaction()?;
     for file in &files {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let locus = name.split('.').next().unwrap_or(name).to_string();
@@ -177,7 +186,7 @@ pub fn run(
         let (results, length, base_count) = process_alignment(&seqs);
         let center = length as f64 / 2.0;
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO loci VALUES (?1, ?2)",
             rusqlite::params![locus, length as i64],
         )?;
@@ -191,7 +200,7 @@ pub fn run(
                 (None, &buckets.missing),
             ] {
                 for &pos in positions {
-                    conn.execute(
+                    tx.execute(
                         "INSERT INTO by_taxon (taxon, locus, position, position_from_center, type) VALUES (?1,?2,?3,?4,?5)",
                         rusqlite::params![taxon, locus, pos, pos as f64 - center, typ],
                     )?;
@@ -227,7 +236,7 @@ pub fn run(
         for pos in positions {
             let p = pos as i64;
             let bases = base_count[&pos] as f64;
-            conn.execute(
+            tx.execute(
                 "INSERT INTO by_locus (locus, majallele, substitutions, deletions, insertions, missing, bases, position, position_from_center, type)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                 rusqlite::params![
@@ -243,12 +252,13 @@ pub fn run(
                     "substitutions",
                 ],
             )?;
-            conn.execute(
+            tx.execute(
                 "INSERT INTO by_locus_missing (locus, present, absent, position, position_from_center, type) VALUES (?1,?2,?3,?4,?5,?6)",
                 rusqlite::params![locus, bases, results.len() as f64 - bases, p, p as f64 - center, "missing"],
             )?;
         }
     }
+    tx.commit()?;
 
     let mut outf = std::fs::File::create(output_file)?;
     writeln!(outf, "substitutions,bp,freq,distance_from_center")?;

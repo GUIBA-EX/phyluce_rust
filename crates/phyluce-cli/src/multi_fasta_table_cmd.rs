@@ -58,14 +58,20 @@ pub fn run_get(fastas_dir: &Path, output: &Path, base_taxon: &str) -> anyhow::Re
         [],
     )?;
 
+    // One transaction for the whole insert loop instead of autocommit's
+    // implicit per-statement transaction/fsync: 5000 single-row INSERTs
+    // without this take ~3.3s, ~4.7ms with it (~700x) -- see
+    // `tests::bench_sqlite_insert_autocommit_vs_one_transaction`.
+    let tx = conn.unchecked_transaction()?;
     for (locus, taxa) in &conserved {
         let names = taxa.iter().map(|t| ident(t)).collect::<Vec<_>>().join(", ");
         let ones = vec!["1"; taxa.len()].join(", ");
-        conn.execute(
+        tx.execute(
             &format!("INSERT INTO {table} (locus, {names}) values (?1, {ones})"),
             [locus],
         )?;
     }
+    tx.commit()?;
     Ok(())
 }
 
@@ -155,4 +161,68 @@ pub fn run_query(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    // Ad hoc benchmark: `run_get`'s insert loop calls `conn.execute(INSERT
+    // ...)` once per locus with no explicit transaction, so each INSERT is
+    // its own SQLite autocommit transaction -- one fsync per row on disk,
+    // regardless of how fast the in-process algorithm is. Compares against
+    // wrapping the same inserts in one transaction, matching the pattern
+    // `phyluce-assembly::db::store_lastz_results` already uses elsewhere.
+    // Uses a real file-backed connection (not `:memory:`), since
+    // `:memory:` never touches disk and would hide exactly the cost this
+    // is measuring. Run with:
+    //   cargo +stable test --release -p phyluce-cli --bin phyluce -- --ignored --nocapture bench_sqlite_insert
+    use rusqlite::Connection;
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join("phyluce-cli-sqlite-bench");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join(format!("{name}-{}.sqlite", std::process::id()))
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_sqlite_insert_autocommit_vs_one_transaction() {
+        let n = 5_000;
+
+        let path = temp_db_path("autocommit");
+        let _ = std::fs::remove_file(&path);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", [])
+            .unwrap();
+        let start = std::time::Instant::now();
+        for i in 0..n {
+            conn.execute("INSERT INTO t (id, v) VALUES (?1, ?2)", rusqlite::params![i, "x"])
+                .unwrap();
+        }
+        let autocommit_elapsed = start.elapsed();
+        drop(conn);
+        std::fs::remove_file(&path).ok();
+
+        let path = temp_db_path("one-tx");
+        let _ = std::fs::remove_file(&path);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", [])
+            .unwrap();
+        let start = std::time::Instant::now();
+        let tx = conn.unchecked_transaction().unwrap();
+        for i in 0..n {
+            tx.execute("INSERT INTO t (id, v) VALUES (?1, ?2)", rusqlite::params![i, "x"])
+                .unwrap();
+        }
+        tx.commit().unwrap();
+        let tx_elapsed = start.elapsed();
+        drop(conn);
+        std::fs::remove_file(&path).ok();
+
+        eprintln!(
+            "[bench] {n} inserts: autocommit (no tx) {:?} vs one transaction {:?} ({:.1}x)",
+            autocommit_elapsed,
+            tx_elapsed,
+            autocommit_elapsed.as_secs_f64() / tx_elapsed.as_secs_f64()
+        );
+    }
 }

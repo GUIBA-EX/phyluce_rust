@@ -87,6 +87,11 @@ pub fn run_get(conf: &Path, output: &Path, base_taxon: &str) -> anyhow::Result<(
 
     let mut chromos: Vec<&String> = conserved.keys().collect();
     chromos.sort();
+    // One transaction for the whole insert loop -- see the identical fix
+    // (and benchmark) in `multi_fasta_table_cmd::run_get`: per-statement
+    // autocommit means one fsync per row, ~700x slower than a single
+    // transaction at a few thousand rows.
+    let tx = conn.unchecked_transaction()?;
     for chromo in chromos {
         let mut intervals: Vec<&Interval> = conserved[chromo].iter().collect();
         intervals.sort_by_key(|iv| iv.start);
@@ -99,7 +104,7 @@ pub fn run_get(conf: &Path, output: &Path, base_taxon: &str) -> anyhow::Result<(
                 .collect::<Vec<_>>()
                 .join(", ");
             let ones = vec!["1"; names.len()].join(", ");
-            conn.execute(
+            tx.execute(
                 &format!(
                     "INSERT INTO {table}(chromo, start, stop, {names_joined}) values (?1, ?2, ?3, {ones})"
                 ),
@@ -107,6 +112,7 @@ pub fn run_get(conf: &Path, output: &Path, base_taxon: &str) -> anyhow::Result<(
             )?;
         }
     }
+    tx.commit()?;
     Ok(())
 }
 
