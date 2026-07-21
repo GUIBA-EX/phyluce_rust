@@ -1,10 +1,10 @@
+[![CI](https://github.com/GUIBA-EX/phyluce_rust/actions/workflows/ci.yml/badge.svg)](https://github.com/GUIBA-EX/phyluce_rust/actions/workflows/ci.yml)
+
 # phyluce_rust
 
 <p align="center">
   <img src="docs/assets/logo.png" alt="phyluce_rust logo" width="240">
 </p>
-
-[![CI](https://github.com/GUIBA-EX/phyluce_rust/actions/workflows/ci.yml/badge.svg)](https://github.com/GUIBA-EX/phyluce_rust/actions/workflows/ci.yml)
 
 [phyluce](https://github.com/faircloth-lab/phyluce)（UCE 系统发育基因组学工具包）的
 Rust 移植版本：命令集与旧脚本名称保持一致，编译为单一静态二进制文件，无需
