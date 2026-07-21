@@ -11,6 +11,14 @@ use std::path::Path;
 pub enum FastaError {
     #[error("{0}")]
     Io(#[from] io::Error),
+    // Deliberately stricter than Biopython's `SeqIO.parse(..., "fasta")`,
+    // which silently skips any content before the first `>` line (or
+    // yields zero records if there's no `>` at all, e.g. a non-FASTA file
+    // with a misleading .fasta extension) rather than erroring. Confirmed
+    // via a live diff against the real phyluce_assembly_get_fasta_lengths:
+    // on such a file it either crashes on `min()` of an empty list
+    // (human-readable mode) or silently prints a `Div/0` row (--csv) --
+    // both worse outcomes than a clear parse error.
     #[error("line {line}: sequence data before any header")]
     DataBeforeHeader { line: usize },
     #[error("empty file")]

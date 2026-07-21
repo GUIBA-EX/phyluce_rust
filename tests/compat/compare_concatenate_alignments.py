@@ -24,7 +24,7 @@ def run_rust(rust_bin, alignments, input_format, output_dir, fmt_flag):
         "--output", str(output_dir),
         f"--{fmt_flag}",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout + proc.stderr
 
 

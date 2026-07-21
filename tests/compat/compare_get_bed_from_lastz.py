@@ -31,7 +31,7 @@ def run_py(lastz_file: Path, out_file: Path, identity: float, continuity: float)
         "--continuity", str(continuity),
     ]
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT, env=env)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, cwd=REPO_ROOT, env=env)
     return proc.returncode, proc.stdout
 
 
@@ -43,7 +43,7 @@ def run_rust(rust_bin: Path, lastz_file: Path, out_file: Path, identity: float, 
         "--identity", str(identity),
         "--continuity", str(continuity),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout
 
 

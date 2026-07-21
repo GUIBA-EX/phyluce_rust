@@ -18,7 +18,7 @@ REPO_ROOT = find_python_repo()
 
 
 def run(rust_bin, args, cwd=None):
-    proc = subprocess.run([str(rust_bin), *args], capture_output=True, text=True, cwd=cwd)
+    proc = subprocess.run([str(rust_bin), *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, cwd=cwd)
     return proc.returncode, proc.stdout, proc.stderr
 
 

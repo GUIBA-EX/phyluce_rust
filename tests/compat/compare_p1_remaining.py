@@ -20,7 +20,7 @@ E_DIR = REPO_ROOT / "phyluce/tests/test-expected"
 
 
 def run(rust_bin, args):
-    proc = subprocess.run([str(rust_bin), *args], capture_output=True, text=True)
+    proc = subprocess.run([str(rust_bin), *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout + proc.stderr
 
 

@@ -20,13 +20,13 @@ REPO_ROOT = find_python_repo()
 def run_py(program, args):
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
     cmd = [sys.executable, str(REPO_ROOT / "bin/utilities" / program), *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=env)
     return proc.returncode, proc.stdout
 
 
 def run_rust(rust_bin, subcmd, args):
     cmd = [str(rust_bin), "utilities", subcmd, *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout
 
 

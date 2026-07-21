@@ -37,7 +37,7 @@ EXPECTED_CSV = FIXTURE_DIR / "probe_match_results.csv"
 
 
 def dump_db(path: Path):
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(str(path))
     c = conn.cursor()
     cols = [
         row[1]
@@ -91,7 +91,7 @@ def main():
                 "--skip-alignment",
                 "--csv", str(csv_out),
             ],
-            capture_output=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
         )
         if proc.returncode != 0:
             print(f"Rust command failed: {proc.stdout}\n{proc.stderr}")

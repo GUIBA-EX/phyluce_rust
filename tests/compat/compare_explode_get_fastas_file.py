@@ -23,7 +23,7 @@ def run_rust(rust_bin, output_dir, by_taxon):
     ]
     if by_taxon:
         cmd.append("--by-taxon")
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout + proc.stderr
 
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Synthetic-regression check for `phyluce probe slice-sequence-from-genomes`.
 
-Like `check_twobit_genome_sequences.py`, this can't be diffed against the
-Python original: it needs `bx.seq.twobit`, which isn't installed here. This
+Doesn't diff against the Python original -- unlike most of the other
+compare_*.py scripts here, this one doesn't need `bx.seq.twobit`
+installed to run (that's optional, only for a *live* comparison); this
 hand-builds a tiny `.2bit` genome + a matching long-format lastz file and
 checks the sliced-and-trimmed FASTA output against a hand-computed
-expectation.
+expectation, so it works with or without bx-python present.
 """
 import struct
 import subprocess
@@ -105,7 +106,7 @@ def main():
                 "--conf", str(conf), "--lastz", str(lastz_dir), "--output", str(out_dir),
                 "--flank", "5",
             ],
-            capture_output=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
         )
         out_fasta = out_dir / "test1.fasta"
         text = out_fasta.read_text() if proc.returncode == 0 and out_fasta.exists() else ""

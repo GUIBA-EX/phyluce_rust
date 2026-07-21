@@ -34,7 +34,7 @@ def run_py(fasta: Path, csv: bool):
     if csv:
         cmd.append("--csv")
     proc = subprocess.run(
-        cmd, capture_output=True, text=True, cwd=REPO_ROOT,
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, cwd=REPO_ROOT,
         env={**_base_env(), "PYTHONPATH": str(REPO_ROOT)},
     )
     return proc.returncode, proc.stdout + proc.stderr
@@ -44,7 +44,7 @@ def run_rust(rust_bin: Path, fasta: Path, csv: bool):
     cmd = [str(rust_bin), "assembly", "get-fasta-lengths", "--input", str(fasta)]
     if csv:
         cmd.append("--csv")
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout + proc.stderr
 
 

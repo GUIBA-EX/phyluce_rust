@@ -30,12 +30,12 @@ EXPECTED = REPO_ROOT / "phyluce/tests/test-expected"
 def run_py(program, args, subdir="align"):
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
     cmd = [sys.executable, str(REPO_ROOT / "bin" / subdir / program), *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=env)
     return proc.returncode, proc.stdout, proc.stderr
 
 
 def run_rust(rust_bin, domain, subcmd, args):
-    proc = subprocess.run([str(rust_bin), domain, subcmd, *args], capture_output=True, text=True)
+    proc = subprocess.run([str(rust_bin), domain, subcmd, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -154,7 +154,7 @@ def main():
             "--alignments", str(EXPECTED / "mafft-gblocks-clean"),
             "--input-format", "nexus",
             "--output", str(legacy_csv),
-        ], capture_output=True, text=True)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         legacy_rows = set(legacy_csv.read_text().splitlines()) if legacy_csv.exists() else set()
         if proc.returncode != 0 or legacy_rows != expected_rows:
             failed += 1
@@ -266,7 +266,7 @@ def main():
         # --- get-incomplete-matrix-estimates ---
         import sqlite3
         db_path = td / "matches.sqlite"
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(str(db_path))
         conn.execute("CREATE TABLE matches (uce text, taxonA text, taxonB text)")
         conn.execute("INSERT INTO matches VALUES ('uce-1', '1', '1')")
         conn.execute("INSERT INTO matches VALUES ('uce-2', '1', '0')")

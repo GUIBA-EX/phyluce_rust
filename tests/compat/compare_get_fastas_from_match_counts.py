@@ -26,7 +26,7 @@ def run_rust(rust_bin, match_count_output, output, incomplete_out=None):
     ]
     if incomplete_out:
         cmd.extend(["--incomplete-matrix", str(incomplete_out)])
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout + proc.stderr
 
 

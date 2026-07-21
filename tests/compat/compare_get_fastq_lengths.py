@@ -26,7 +26,7 @@ def run_py(input_dir: Path, csv: bool):
     if csv:
         cmd.append("--csv")
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT, env=env)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, cwd=REPO_ROOT, env=env)
     return proc.returncode, proc.stdout
 
 
@@ -34,7 +34,7 @@ def run_rust(rust_bin: Path, input_dir: Path, csv: bool):
     cmd = [str(rust_bin), "assembly", "get-fastq-lengths", "--input", str(input_dir)]
     if csv:
         cmd.append("--csv")
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout
 
 

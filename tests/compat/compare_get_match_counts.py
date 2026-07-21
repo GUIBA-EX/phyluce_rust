@@ -34,7 +34,7 @@ def run_rust(rust_bin: Path, output: Path, incomplete: bool):
     ]
     if incomplete:
         cmd.append("--incomplete-matrix")
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout + proc.stderr
 
 
@@ -50,14 +50,14 @@ def run_random_optimize(rust_bin: Path, database: Path, config: Path, output: Pa
         "--sample-size", "2",
         "--seed", "7",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout + proc.stderr
 
 
 def write_optimize_fixture(root: Path):
     database = root / "optimize.sqlite"
     config = root / "optimize.conf"
-    with sqlite3.connect(database) as conn:
+    with sqlite3.connect(str(database)) as conn:
         conn.executescript(
             """
             CREATE TABLE matches (uce TEXT PRIMARY KEY, a INTEGER, b INTEGER, c INTEGER);

@@ -49,7 +49,7 @@ def main():
                 "--match-count-output", str(E_DIR / "taxon-set.incomplete.conf"),
                 "--incomplete-matrix", str(E_DIR / "taxon-set.incomplete"),
             ],
-            capture_output=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
         )
         if proc.returncode != 0:
             print(f"add-missing-data-designators failed:\n{proc.stdout}\n{proc.stderr}")
@@ -67,7 +67,7 @@ def main():
                 "--input-format", "nexus",
                 "--output-format", "nexus",
             ],
-            capture_output=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
         )
         if proc.returncode != 0:
             print(f"remove-empty-taxa failed:\n{proc.stdout}\n{proc.stderr}")

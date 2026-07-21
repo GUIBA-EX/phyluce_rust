@@ -56,7 +56,7 @@ def main():
                 "--taxa", "4",
                 "--no-trim",
             ],
-            capture_output=True, text=True, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=env,
         )
         if proc.returncode != 0:
             print(f"command failed:\n{proc.stdout}\n{proc.stderr}")

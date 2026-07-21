@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Synthetic-regression check for `phyluce probe get-genome-sequences-from-bed`.
 
-`bx-python` (and thus `bx.seq.twobit`, which the Python original depends on)
-isn't installed in this environment, so this can't be diffed against the
-Python script directly. Instead we hand-encode a minimal, spec-correct
-`.2bit` file in pure Python (no bx-python needed to *write* one) and check
-the Rust CLI decodes/slices it correctly against a known-good expected
-sequence.
+Doesn't diff against the Python original, which depends on `bx-python`
+(`bx.seq.twobit`) -- that's optional and only needed for a *live*
+comparison, not for this script. Instead we hand-encode a minimal,
+spec-correct `.2bit` file in pure Python (no bx-python needed to *write*
+one) and check the Rust CLI decodes/slices it correctly against a
+known-good expected sequence.
 """
 import struct
 import subprocess
@@ -56,7 +56,7 @@ def build_twobit(name: str, bases: str, n_blocks, mask_blocks) -> bytes:
 
 
 def run_rust(rust_bin, subcmd, args):
-    proc = subprocess.run([str(rust_bin), "probe", subcmd, *args], capture_output=True, text=True)
+    proc = subprocess.run([str(rust_bin), "probe", subcmd, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout, proc.stderr
 
 

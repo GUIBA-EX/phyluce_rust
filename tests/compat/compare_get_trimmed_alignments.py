@@ -36,7 +36,7 @@ def main():
                 "--alignments", str(INPUT_DIR),
                 "--output", str(output_dir),
             ],
-            capture_output=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
         )
         if proc.returncode != 0:
             print(f"command failed:\n{proc.stdout}\n{proc.stderr}")

@@ -29,12 +29,12 @@ REPO_ROOT = find_python_repo()
 def run_py(program, args):
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
     cmd = [sys.executable, str(REPO_ROOT / "bin/probes" / program), *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=env)
     return proc.returncode, proc.stdout
 
 
 def run_rust(rust_bin, subcmd, args):
-    proc = subprocess.run([str(rust_bin), "probe", subcmd, *args], capture_output=True, text=True)
+    proc = subprocess.run([str(rust_bin), "probe", subcmd, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     return proc.returncode, proc.stdout
 
 
@@ -115,7 +115,7 @@ def main():
             failed += 1
             print("get-multi-fasta-table: command failed")
         else:
-            conn = sqlite3.connect(mft_db)
+            conn = sqlite3.connect(str(mft_db))
             rows = conn.execute("SELECT locus, taxonA, taxonB FROM taxonA ORDER BY locus").fetchall()
             conn.close()
             expected_rows = [("1", 1, 1), ("2", 0, 1)]
@@ -262,7 +262,16 @@ def main():
                 "--mafft-binary", shutil.which("mafft"),
             ])
             multi_text = recon_multi_out.read_text() if rcode == 0 else ""
-            if rcode != 0 or not multi_text.startswith(">uce-2\n") or "ACGT" not in multi_text:
+            # Case-insensitive: real MAFFT lowercases its output by default,
+            # and Biopython's actual `dumb_consensus()` doesn't normalize
+            # case (confirmed by reading its source), so a lowercase
+            # consensus here is the correct match for Python's own
+            # real-world behavior, not a Rust-side bug.
+            if (
+                rcode != 0
+                or not multi_text.upper().startswith(">UCE-2\n")
+                or "ACGT" not in multi_text.upper()
+            ):
                 failed += 1
                 print(f"reconstruct-uce-from-probe (multi-probe, mafft): unexpected output {multi_text!r}")
 
