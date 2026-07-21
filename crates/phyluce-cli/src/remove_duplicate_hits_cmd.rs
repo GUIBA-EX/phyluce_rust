@@ -100,7 +100,10 @@ pub fn run(
             }
             count += 1;
             let fields: Vec<&str> = line.trim().split('\t').collect();
-            let locus = probe_name(fields[3], &regex)?;
+            let name = fields.get(3).ok_or_else(|| {
+                anyhow::anyhow!("malformed BED line in {}: {line:?}", probe_bed.display())
+            })?;
+            let locus = probe_name(name, &regex)?;
             if !dupes.contains(&locus) {
                 writeln!(out, "{line}")?;
                 kept += 1;
@@ -126,8 +129,10 @@ pub fn run(
             }
             count += 1;
             let fields: Vec<&str> = line.trim().split('\t').collect();
-            let locus = fields[3];
-            if !dupes.contains(locus) {
+            let locus = fields.get(3).ok_or_else(|| {
+                anyhow::anyhow!("malformed BED line in {}: {line:?}", locus_bed.display())
+            })?;
+            if !dupes.contains(*locus) {
                 writeln!(out, "{line}")?;
                 kept += 1;
             }

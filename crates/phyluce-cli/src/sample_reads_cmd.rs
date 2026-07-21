@@ -78,7 +78,7 @@ fn run_seqkit(
     // instead, which it streams.
     let file_reads = count_fastq_reads(Path::new(fastq))?;
     anyhow::ensure!(file_reads > 0, "{fastq} has no reads to sample from");
-    let proportion = (reads as f64 / file_reads as f64).min(1.0);
+    let proportion = (reads as f64 / file_reads as f64).clamp(0.0, 1.0);
 
     let out = std::fs::OpenOptions::new()
         .create(true)
@@ -178,6 +178,11 @@ pub fn run(conf: &Path, output: &Path) -> anyhow::Result<()> {
         let mtdna = (mtdna_frac * mtdna_reads as f64) as i64;
         to_get.insert("mtdna".to_string(), mtdna);
 
+        anyhow::ensure!(
+            uce + mtdna <= total_reads,
+            "splits.uce_reads ({frac}) and splits.mtdna_reads ({mtdna_frac}) together request {uce} + {mtdna} = {} reads, more than splits.total_reads ({total_reads})",
+            uce + mtdna
+        );
         let genome = total_reads - uce - mtdna;
         to_get.insert("genome".to_string(), genome);
 

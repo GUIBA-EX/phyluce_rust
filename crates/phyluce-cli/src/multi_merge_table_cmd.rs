@@ -189,6 +189,11 @@ pub fn run_query(
             for i in 4..column_count {
                 sum += row.get::<_, i64>(i)?;
             }
+            anyhow::ensure!(
+                (0..=taxa.len() as i64).contains(&sum),
+                "row in {base_taxon:?} has taxon-column sum {sum}, expected a value in 0..={} (are all taxon columns 0 or 1?)",
+                taxa.len()
+            );
             counts[sum as usize] += 1;
         }
         for i in 0..=taxa.len() {

@@ -47,47 +47,61 @@ pub fn run(
             .unwrap_or("")
             .to_string();
 
+        // trimAl writes its output beside the *input* file (in
+        // `alignments_dir`, not `output_dir`), using a fixed `-trimal`
+        // suffix -- it must be removed on every exit path (trimAl success
+        // followed by an unparseable/invalid result included), not just
+        // after a successful `read_fasta`, or a failure leaves a stray
+        // `<locus>.fasta-trimal` sidecar permanently in the user's input
+        // directory.
         let trimmed_path = std::path::PathBuf::from(format!("{}-trimal", file.display()));
-        crate::output_path::remove_stale_file(&trimmed_path)?;
-        let output = std::process::Command::new(&trimal_bin)
-            .arg("-in")
-            .arg(&file)
-            .arg("-out")
-            .arg(&trimmed_path)
-            .arg("-automated1")
-            .arg("-fasta")
-            .output()
-            .with_context(|| format!("running trimAl for locus {name}"))?;
-        anyhow::ensure!(
-            output.status.success(),
-            "trimAl failed for locus {name}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+        let result = (|| -> anyhow::Result<Option<String>> {
+            crate::output_path::remove_stale_file(&trimmed_path)?;
+            let output = std::process::Command::new(&trimal_bin)
+                .arg("-in")
+                .arg(&file)
+                .arg("-out")
+                .arg(&trimmed_path)
+                .arg("-automated1")
+                .arg("-fasta")
+                .output()
+                .with_context(|| format!("running trimAl for locus {name}"))?;
+            anyhow::ensure!(
+                output.status.success(),
+                "trimAl failed for locus {name}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
 
-        if !trimmed_path.is_file() {
-            anyhow::bail!("trimAl did not create output for locus {name}");
-        }
-        let records = read_fasta(&trimmed_path)?;
-        std::fs::remove_file(&trimmed_path)?;
-        if records.is_empty() {
-            return Ok(Some(format!("Missing information for locus {name}")));
-        }
-        let trimmed = phyluce_align::Alignment::from_pairs(
-            records.into_iter().map(|r| (r.id, r.sequence)).collect(),
-        );
-        trimmed.validate()?;
-
-        let ext = output_format;
-        let out_path = output_dir.join(format!("{name}.{ext}"));
-        if output_format == "fasta" {
-            let mut out = std::fs::File::create(out_path)?;
-            for row in &trimmed.rows {
-                phyluce_io::write_fasta_record(&mut out, &row.id, std::str::from_utf8(&row.seq)?)?;
+            if !trimmed_path.is_file() {
+                anyhow::bail!("trimAl did not create output for locus {name}");
             }
-        } else {
-            std::fs::write(out_path, format_nexus(&trimmed))?;
-        }
-        Ok(None)
+            let records = read_fasta(&trimmed_path)?;
+            if records.is_empty() {
+                return Ok(Some(format!("Missing information for locus {name}")));
+            }
+            let trimmed = phyluce_align::Alignment::from_pairs(
+                records.into_iter().map(|r| (r.id, r.sequence)).collect(),
+            );
+            trimmed.validate()?;
+
+            let ext = output_format;
+            let out_path = output_dir.join(format!("{name}.{ext}"));
+            if output_format == "fasta" {
+                let mut out = std::fs::File::create(out_path)?;
+                for row in &trimmed.rows {
+                    phyluce_io::write_fasta_record(
+                        &mut out,
+                        &row.id,
+                        std::str::from_utf8(&row.seq)?,
+                    )?;
+                }
+            } else {
+                std::fs::write(out_path, format_nexus(&trimmed))?;
+            }
+            Ok(None)
+        })();
+        let _ = std::fs::remove_file(&trimmed_path);
+        result
     })?;
     for warning in warnings.into_iter().flatten() {
         crate::cli_warn!("{warning}");

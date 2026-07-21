@@ -51,8 +51,14 @@ pub fn concatenate(files: &[(String, Alignment)]) -> (Alignment, Vec<Charset>) {
     }];
 
     for (name, aln) in &files[1..] {
-        let locus_index: FastMap<&str, &AlignmentRow> =
-            aln.rows.iter().map(|r| (r.id.as_str(), r)).collect();
+        // `entry().or_insert()`, not `.collect()`: a locus with duplicate
+        // taxon IDs (malformed input) should keep the *first* matching
+        // row, matching the old `Vec::iter().find()` this replaced --
+        // `.collect()` into a HashMap keeps whichever insert happens last.
+        let mut locus_index: FastMap<&str, &AlignmentRow> = FastMap::default();
+        for r in &aln.rows {
+            locus_index.entry(r.id.as_str()).or_insert(r);
+        }
 
         // Taxa already in the matrix: extend with this locus's sequence
         // (`both`, from the old naming) or pad with `?` if this locus
@@ -245,6 +251,18 @@ mod tests {
         let (combined, _) = concatenate(&[("a".to_string(), a), ("b".to_string(), b)]);
         assert_eq!(combined.rows.last().unwrap().id, "z");
         assert_eq!(combined.rows.last().unwrap().seq, b"????TT");
+    }
+
+    #[test]
+    fn duplicate_taxon_id_in_a_locus_keeps_the_first_row() {
+        let a = Alignment::from_pairs(vec![("x".to_string(), "AA".to_string())]);
+        let b = Alignment::from_pairs(vec![
+            ("x".to_string(), "CC".to_string()),
+            ("x".to_string(), "GG".to_string()),
+        ]);
+        let (combined, _) = concatenate(&[("a".to_string(), a), ("b".to_string(), b)]);
+        let x = combined.rows.iter().find(|r| r.id == "x").unwrap();
+        assert_eq!(x.seq, b"AACC");
     }
 
     #[test]

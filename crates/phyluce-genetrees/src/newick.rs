@@ -428,14 +428,19 @@ fn collect_bipartitions(
         return;
     }
     let side = leaves(node);
-    // non-trivial bipartitions only (every leaf, or a single leaf, carries
-    // no topological information).
-    if side.len() > 1 && side.len() < all_leaves.len() {
-        let normalized: Vec<String> = if side.contains(outgroup) {
-            all_leaves.difference(&side).cloned().collect()
-        } else {
-            side.iter().cloned().collect()
-        };
+    let normalized: Vec<String> = if side.contains(outgroup) {
+        all_leaves.difference(&side).cloned().collect()
+    } else {
+        side.iter().cloned().collect()
+    };
+    // Non-trivial bipartitions only (every leaf, or a single leaf, carries
+    // no topological information). Filtered on the *normalized* side, not
+    // the pre-normalization `side`: a node whose side is "every leaf but
+    // the outgroup" has `side.len() == all_leaves.len() - 1` (not trivial
+    // by that measure) but normalizes down to just `{outgroup}` -- a
+    // single leaf's own pendant edge, which is trivial. Filtering on
+    // `side.len()` let those slip through as spurious non-trivial splits.
+    if normalized.len() > 1 && normalized.len() < all_leaves.len() {
         out.insert(normalized);
     }
     for c in &node.children {
@@ -611,23 +616,9 @@ mod tests {
                     all_leaves,
                     "seed={seed} n_leaves={n_leaves} outgroup={outgroup}: leaf set changed"
                 );
-                // `bipartitions_polarized_by` filters trivial splits by the
-                // *pre-normalization* side's size, so a split that's
-                // genuinely "N-1 leaves vs. 1 leaf" can still show up
-                // normalized down to a single-element set -- that's just
-                // one leaf's own pendant/terminal edge (true of literally
-                // every leaf in every tree), not real topological
-                // information, and standard phylogenetic tree comparisons
-                // (e.g. Robinson-Foulds) exclude pendant edges the same
-                // way. Filter those out here rather than changing
-                // `bipartitions_polarized_by` itself, which other code
-                // (`tree_counts_cmd`) already depends on as-is.
-                let non_trivial = |bp: BTreeSet<Vec<String>>| -> BTreeSet<Vec<String>> {
-                    bp.into_iter().filter(|side| side.len() > 1).collect()
-                };
                 assert_eq!(
-                    non_trivial(bipartitions_polarized_by(&tree, outgroup)),
-                    non_trivial(bipartitions_polarized_by(&rerooted, outgroup)),
+                    bipartitions_polarized_by(&tree, outgroup),
+                    bipartitions_polarized_by(&rerooted, outgroup),
                     "seed={seed} n_leaves={n_leaves} outgroup={outgroup}: topology changed"
                 );
 

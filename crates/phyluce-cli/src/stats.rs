@@ -150,6 +150,13 @@ impl FastqLengthReport {
     }
 
     pub fn to_human_report(&self) -> String {
+        if self.count == 0 {
+            // Matches `to_csv_row`'s `Div/0` handling for the same input:
+            // without this, avg/stderr/median compute as literal `NaN`
+            // here while the CSV path already has a clean fallback for an
+            // empty/all-empty FASTQ directory.
+            return "Reads:\t\t0\nBp:\t\t0\nAvg. len:\tDiv/0\nSTDERR len:\tDiv/0\nMin. len:\tDiv/0\nMax. len:\tDiv/0\nMedian len:\tDiv/0\n".to_string();
+        }
         format!(
             "Reads:\t\t{}\nBp:\t\t{}\nAvg. len:\t{}\nSTDERR len:\t{}\nMin. len:\t{}\nMax. len:\t{}\nMedian len:\t{}\n",
             group_thousands(&self.count.to_string()),
@@ -257,6 +264,20 @@ mod tests {
     fn median_odd_and_even() {
         assert_eq!(median_of(&[1, 2, 3]), 2.0);
         assert_eq!(median_of(&[1, 2, 3, 4]), 2.5);
+    }
+
+    #[test]
+    fn fastq_human_report_shows_div0_not_nan_for_empty_input() {
+        let report = FastqLengthReport::from_lengths(&[]);
+        let human = report.to_human_report();
+        assert!(
+            !human.contains("nan"),
+            "human report contained 'nan': {human}"
+        );
+        assert!(
+            human.contains("Div/0"),
+            "human report missing Div/0: {human}"
+        );
     }
 
     #[test]

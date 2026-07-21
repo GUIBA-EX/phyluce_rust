@@ -211,7 +211,18 @@ pub fn run(
             if clean {
                 cleanup_abyss_assembly_folder(&sample_dir, single_end)?;
             }
-        } else {
+        } else if abyss_se || (reads.r1.is_some() && reads.r2.is_none()) {
+            // Mirrors the Python original's dispatch: single-end assembly
+            // runs when `--abyss-se` is forced, or when only R1 (no R2) was
+            // found. Either way `run_abyss_se` needs R1, which the
+            // `reads.r1.is_some() && reads.r2.is_none()` arm already
+            // guarantees, but the `--abyss-se` arm doesn't -- ensure it
+            // explicitly instead of the two-argument-position `.unwrap()`s
+            // inside `run_abyss_se` panicking on a singleton-only sample.
+            anyhow::ensure!(
+                reads.r1.is_some(),
+                "sample {sample}: no R1 read file found, cannot run abyss-se (only a singleton file, if any, was found)"
+            );
             let bin = abyss_bin
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("Cannot find abyss"))?;
@@ -220,6 +231,10 @@ pub fn run(
             if clean {
                 cleanup_abyss_assembly_folder(&sample_dir, single_end)?;
             }
+        } else {
+            anyhow::bail!(
+                "sample {sample}: no R1 read file found and --abyss-se not set; nothing to assemble"
+            );
         }
 
         let contigs_file = find_contigs_file(&sample_dir)?;

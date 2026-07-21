@@ -50,11 +50,13 @@ pub fn parse_charsets(text: &str) -> Vec<Charset> {
         ) else {
             continue;
         };
-        charsets.push(Charset {
-            name,
-            start: start - 1,
-            stop,
-        });
+        // `start` is 1-indexed in NEXUS charset syntax; `0-N` isn't a valid
+        // charset line (there is no column 0), so skip it rather than
+        // underflowing `start - 1`.
+        let Some(start) = start.checked_sub(1) else {
+            continue;
+        };
+        charsets.push(Charset { name, start, stop });
     }
     charsets
 }
@@ -87,6 +89,14 @@ mod tests {
         assert_eq!((charsets[0].start, charsets[0].stop), (0, 459));
         assert_eq!(charsets[1].name, "uce-2.nexus");
         assert_eq!((charsets[1].start, charsets[1].stop), (459, 1068));
+    }
+
+    #[test]
+    fn skips_a_zero_based_charset_line_instead_of_underflowing() {
+        let text = "begin sets;\ncharset 'bad' = 0-10;\ncharset 'ok' = 1-5;\nend;\n";
+        let charsets = parse_charsets(text);
+        assert_eq!(charsets.len(), 1);
+        assert_eq!(charsets[0].name, "ok");
     }
 
     #[test]

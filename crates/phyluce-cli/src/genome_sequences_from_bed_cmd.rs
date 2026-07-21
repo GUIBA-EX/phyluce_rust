@@ -20,9 +20,9 @@ pub fn run(
 
     let mut filtered = 0usize;
     let mut kept = 0usize;
-    let mut cnt = 0usize;
-    for (i, line) in bed_text.lines().enumerate() {
-        cnt = i;
+    let mut total_lines = 0usize;
+    for (cnt, line) in bed_text.lines().enumerate() {
+        total_lines += 1;
         let fields: Vec<&str> = line.trim().split('\t').collect();
         anyhow::ensure!(fields.len() == 3, "malformed BED line: {line:?}");
         let chromo = fields[0];
@@ -62,9 +62,14 @@ pub fn run(
         }
     }
 
+    // Not `cnt + 1` (Python's approach, using the *last* loop index):
+    // that only works because Python's `enumerate()` also happens to
+    // crash with `UnboundLocalError` on an empty BED file (`cnt` is never
+    // bound), so it never has to handle `cnt == 0` meaning zero lines
+    // instead of one. Track the real line count instead, so an empty BED
+    // file cleanly reports 0 rather than misreporting 1.
     crate::cli_warn!(
-        "Screened {} sequences.  Filtered {filtered} < 160 bp or with > {}% masked bases or > {max_n} N-bases. Kept {kept}.",
-        cnt + 1,
+        "Screened {total_lines} sequences.  Filtered {filtered} < 160 bp or with > {}% masked bases or > {max_n} N-bases. Kept {kept}.",
         filter_mask.unwrap_or(0.25) * 100.0,
     );
     Ok(())

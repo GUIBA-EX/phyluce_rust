@@ -20,29 +20,37 @@ pub fn run(alignments_dir: &Path, output_dir: &Path, input_format: &str) -> anyh
             std::env::temp_dir().join(format!("phyluce-raxml-reduce-{}", std::process::id()));
         std::fs::create_dir_all(&tdir)?;
 
-        ExternalCommand::new(&raxml_bin)
-            .args([
-                "-f".to_string(),
-                "c".to_string(),
-                "-m".to_string(),
-                "GTRGAMMA".to_string(),
-                "-s".to_string(),
-                file.to_string_lossy().to_string(),
-                "-w".to_string(),
-                tdir.to_string_lossy().to_string(),
-                "-n".to_string(),
-                "test".to_string(),
-            ])
-            .run()?;
+        // `tdir` must be removed whether RAxML succeeds or fails (a
+        // malformed/degenerate locus can make RAxML exit non-zero), so run
+        // the fallible steps in a closure and always clean up afterward
+        // rather than an early `?` return skipping the `remove_dir_all`.
+        let result = (|| -> anyhow::Result<()> {
+            ExternalCommand::new(&raxml_bin)
+                .args([
+                    "-f".to_string(),
+                    "c".to_string(),
+                    "-m".to_string(),
+                    "GTRGAMMA".to_string(),
+                    "-s".to_string(),
+                    file.to_string_lossy().to_string(),
+                    "-w".to_string(),
+                    tdir.to_string_lossy().to_string(),
+                    "-n".to_string(),
+                    "test".to_string(),
+                ])
+                .run()?;
 
-        let reduced_pth = file.with_file_name(format!("{old_name}.reduced"));
-        let new_pth = output_dir.join(old_name);
-        if reduced_pth.exists() {
-            std::fs::rename(&reduced_pth, &new_pth)?;
-        } else {
-            std::fs::copy(file, &new_pth)?;
-        }
-        std::fs::remove_dir_all(&tdir)?;
+            let reduced_pth = file.with_file_name(format!("{old_name}.reduced"));
+            let new_pth = output_dir.join(old_name);
+            if reduced_pth.exists() {
+                std::fs::rename(&reduced_pth, &new_pth)?;
+            } else {
+                std::fs::copy(file, &new_pth)?;
+            }
+            Ok(())
+        })();
+        let _ = std::fs::remove_dir_all(&tdir);
+        result?;
         print!(".");
     }
     crate::cli_info!();

@@ -200,7 +200,13 @@ pub fn run(
             (Some(_), None) => {
                 crate::cli_warn!("assemblo-spades will not run single-end data");
             }
-            _ => {}
+            (None, _) => {
+                // Matches the Python original's silent no-op here (it only
+                // has `if r1 and r2` / `elif r1`, nothing for r1 missing),
+                // but a sample producing no assembly with zero log output
+                // is easy to miss -- warn instead of staying silent.
+                crate::cli_warn!("sample {sample}: no R1 read file found, skipping");
+            }
         }
     }
     Ok(())

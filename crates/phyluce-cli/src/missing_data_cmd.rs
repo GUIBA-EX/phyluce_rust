@@ -72,8 +72,17 @@ pub fn run(
         let overall_length = alignment.nchar();
         let mut local_organisms = organisms.clone();
         let mut rows = Vec::with_capacity(organisms.len());
+        // Mirrors Python's `loc = "_".join(seq.name.split("_")[:1])`: after
+        // the loop below, `seq` (Python's leaked loop variable) still holds
+        // the *last row's* stripped name, and that -- not the file name --
+        // is what non-verbatim mode checks against `--incomplete-matrix`.
+        // (Every row in one alignment shares the same locus prefix, so in
+        // practice this is "the" locus; it just isn't derived from the
+        // file name the way the output file's name is.)
+        let mut last_stripped = String::new();
         for row in &alignment.rows {
             let stripped = lstrip_r_chars(&row.id);
+            last_stripped = stripped.to_string();
             let new_name = if verbatim {
                 stripped.to_string()
             } else {
@@ -91,21 +100,30 @@ pub fn run(
                 seq: row.seq.clone(),
             });
         }
+        let check_locus = if verbatim {
+            locus.clone()
+        } else {
+            last_stripped
+                .split('_')
+                .next()
+                .unwrap_or(&last_stripped)
+                .to_string()
+        };
 
         for org in &local_organisms {
             if check_missing {
                 if let Some(missing_map) = &missing {
                     let has_locus = missing_map
                         .get(org)
-                        .map(|loci| loci.contains(&locus))
+                        .map(|loci| loci.contains(&check_locus))
                         .unwrap_or(false)
                         || missing_map
                             .get(&format!("{org}*"))
-                            .map(|loci| loci.contains(&locus))
+                            .map(|loci| loci.contains(&check_locus))
                             .unwrap_or(false);
                     anyhow::ensure!(
                         has_locus,
-                        "locus {locus} missing from the incomplete-matrix report for organism {org}"
+                        "locus {check_locus} missing from the incomplete-matrix report for organism {org}"
                     );
                 }
             }

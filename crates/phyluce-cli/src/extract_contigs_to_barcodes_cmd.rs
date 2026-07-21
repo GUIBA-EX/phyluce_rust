@@ -28,7 +28,10 @@ pub fn run(contigs_dir: &Path, config: &Path, output: &Path) -> anyhow::Result<(
             let path = contigs_dir.join(assembly.replace('_', "-"));
             let index = match read_fasta(&path) {
                 Ok(records) => Some(records.into_iter().map(|r| (r.id.clone(), r)).collect()),
-                Err(_) => None,
+                Err(e) => {
+                    crate::cli_warn!("Unable to parse FASTA {}: {e}", path.display());
+                    None
+                }
             };
             cache.insert(assembly.clone(), index);
         }
