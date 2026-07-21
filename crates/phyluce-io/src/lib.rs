@@ -230,6 +230,21 @@ mod tests {
     // Ad hoc benchmark for `read_fasta`'s per-line String allocation.
     // Run with:
     //   cargo +stable test --release -p phyluce-io --lib -- --ignored --nocapture bench_
+    //
+    // Checked against rust-bio's `bio::io::fasta`/`fastq` readers (a
+    // temporary dev-dependency, removed after measuring): on this same
+    // benchmark, rust-bio parsed ~2x faster for FASTA and ~1.8x faster for
+    // FASTQ (both still >1 GB/s here either way). Not adopted: `bio` pulls
+    // in 83 transitive crates (ndarray, nalgebra, statrs, petgraph, rand,
+    // ...) for functionality this project only needs a sliver of, and
+    // phyluce-io is a foundational dependency of every command in this
+    // workspace -- that cost would be paid everywhere for a component
+    // that real UCE pipelines don't spend much time in (LASTZ/MAFFT/
+    // SPAdes/etc. subprocess time dominates, not our own file parsing).
+    // If FASTA/FASTQ parsing is ever shown to actually be a bottleneck in
+    // a real run, the fix should be hand-optimizing this reader (e.g.
+    // reading into reused byte buffers instead of per-line `String`
+    // allocation) rather than taking on `bio`'s dependency footprint.
     #[test]
     #[ignore]
     fn bench_read_fasta_large_file() {
