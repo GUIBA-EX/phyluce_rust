@@ -1,4 +1,4 @@
-# phyluce Rust CLI
+# phyluce_rust
 
 <p align="center">
   <img src="docs/assets/logo.png" alt="phyluce_rust logo" width="240">
