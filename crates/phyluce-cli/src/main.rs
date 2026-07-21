@@ -999,9 +999,10 @@ enum UtilitiesAction {
         #[arg(long, default_value_t = false)]
         new_style: bool,
     },
-    /// Equivalent to `phyluce_utilities_sample_reads_from_files`. Untested:
-    /// `seqtk` isn't installed in this environment -- see
-    /// `sample_reads_cmd` docs.
+    /// Equivalent to `phyluce_utilities_sample_reads_from_files`. Shells out
+    /// to `seqkit sample` rather than the Python original's `seqtk sample`
+    /// -- see `sample_reads_cmd` docs for why, and what's not
+    /// byte-for-byte compatible about it.
     SampleReadsFromFiles {
         #[arg(long)]
         conf: PathBuf,

@@ -1296,7 +1296,7 @@ phyluce utilities unmix-fasta-reads \
   --out-r-singleton reads_singleton.fasta
 ```
 
-用 seqtk 抽样 reads：
+抽样 reads（依赖外部 `seqkit`，`phyluce.conf` 里配置为 `[binaries] seqkit`）：
 
 ```bash
 phyluce utilities sample-reads-from-files \
@@ -1304,7 +1304,9 @@ phyluce utilities sample-reads-from-files \
   --output sampled-reads
 ```
 
-注意：`sample-reads-from-files` 仍依赖外部 `seqtk`。
+注意：原版用的是 `seqtk sample`，Rust 版换成了 `seqkit sample`（单一静态二进制，
+维护更活跃）。两者抽样算法/随机数流不同，同一个种子在两边会选出不同的 read
+子集——同一版本 `seqkit` 内部可复现，但跟历史上 `seqtk` 跑出的结果对不上。
 
 ## 10. NCBI 命令
 

@@ -1,8 +1,18 @@
 //! CLI wiring for `phyluce utilities sample-reads-from-files`, mirroring
 //! `phyluce_utilities_sample_reads_from_files`.
 //!
-//! Untested: shells out to `seqtk`, which isn't installed in this
-//! environment.
+//! Shells out to `seqkit sample` rather than the Python original's
+//! `seqtk sample`: seqkit is a single static Go binary (no C toolchain/
+//! htslib to build), more actively maintained, and its `sample` has the
+//! same shape (a `-s` seed plus a target size). Not a byte-for-byte
+//! substitute, though -- seqkit's sampling algorithm/RNG differs from
+//! seqtk's, so the same seed picks a *different* read set between the two
+//! tools (each is internally reproducible on repeated runs, just not
+//! cross-tool). And seqkit's own `--help` warns that `-n <count>` (an
+//! exact count) loads the whole FASTQ into memory on large files; this
+//! samples by `-p <proportion>` instead (computed from the target count
+//! and the file's own read count, via `count_fastq_reads`), which seqkit
+//! streams.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -10,7 +20,7 @@ use std::process::{Command, Stdio};
 /// Simple xorshift RNG, consistent with the pattern used elsewhere in
 /// this port (e.g. `bootstrap_count_cmd`) -- not a reproduction of
 /// Python's Mersenne Twister, just a stand-in for `random.randrange`
-/// (the seed is only used to keep R1/R2 in sync within one seqtk call
+/// (the seed is only used to keep R1/R2 in sync within one seqkit call
 /// pair, not for any downstream correctness).
 struct SimpleRng(u64);
 
@@ -34,8 +44,8 @@ fn count_fastq_reads(path: &Path) -> anyhow::Result<usize> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_seqtk(
-    seqtk_bin: &str,
+fn run_seqkit(
+    seqkit_bin: &str,
     frac: f64,
     total_reads: i64,
     rand: u64,
@@ -54,7 +64,7 @@ fn run_seqtk(
         frac * 100.0
     ));
     let err_fname = output_dir.join(format!(
-        "{dir_name}_{:.0}_{total_reads}r_L001_{read_label}_001.seqtk-err.txt",
+        "{dir_name}_{:.0}_{total_reads}r_L001_{read_label}_001.seqkit-err.txt",
         frac * 100.0
     ));
 
@@ -62,6 +72,16 @@ fn run_seqtk(
         "\tfrac:{frac}, input:{fastq}, rand:{rand}, reads:{reads}, out_fname:{}",
         out_fname.display()
     );
+
+    // seqkit's `-n <count>` loads the whole FASTQ into memory (its own
+    // --help warns against this on large files); sample by proportion
+    // instead, which it streams.
+    let file_reads = count_fastq_reads(Path::new(fastq))?;
+    anyhow::ensure!(
+        file_reads > 0,
+        "{fastq} has no reads to sample from"
+    );
+    let proportion = (reads as f64 / file_reads as f64).min(1.0);
 
     let out = std::fs::OpenOptions::new()
         .create(true)
@@ -71,19 +91,19 @@ fn run_seqtk(
         .create(true)
         .append(true)
         .open(&err_fname)?;
-    let seed = format!("-s{rand}");
-    let reads = reads.to_string();
-    let status = Command::new(seqtk_bin)
-        .args(["sample", &seed, fastq, &reads])
+    let seed = rand.to_string();
+    let proportion_arg = proportion.to_string();
+    let status = Command::new(seqkit_bin)
+        .args(["sample", "-p", &proportion_arg, "-s", &seed, fastq])
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err))
         .status()?;
-    anyhow::ensure!(status.success(), "seqtk failed with status {status}");
+    anyhow::ensure!(status.success(), "seqkit failed with status {status}");
     Ok(())
 }
 
-fn sample_reads_with_seqtk(
-    seqtk_bin: &str,
+fn sample_reads_with_seqkit(
+    seqkit_bin: &str,
     frac: f64,
     total_reads: i64,
     reads: &std::collections::HashMap<String, Vec<String>>,
@@ -99,8 +119,8 @@ fn sample_reads_with_seqtk(
         let rand = rng.randrange(1_000_000);
         if let Some(paths) = reads.get(name) {
             for (item, path) in paths.iter().enumerate() {
-                run_seqtk(
-                    seqtk_bin,
+                run_seqkit(
+                    seqkit_bin,
                     frac,
                     total_reads,
                     rand,
@@ -118,7 +138,7 @@ fn sample_reads_with_seqtk(
 pub fn run(conf: &Path, output: &Path) -> anyhow::Result<()> {
     crate::output_path::prepare_output_dir(output)?;
     let cfg = phyluce_config::PhyluceConfig::load()?;
-    let seqtk_bin = cfg.get_user_path("binaries", "seqtk")?;
+    let seqkit_bin = cfg.get_user_path("binaries", "seqkit")?;
 
     let conf_text = std::fs::read_to_string(conf)?;
     let reads = crate::conf::read_ini_values(&conf_text, "reads")?;
@@ -167,8 +187,8 @@ pub fn run(conf: &Path, output: &Path) -> anyhow::Result<()> {
         crate::cli_warn!(
             "Reads:{total_reads}, UCE:{uce} - {frac} on target, mtDNA:{mtdna}, genome:{genome}"
         );
-        sample_reads_with_seqtk(
-            &seqtk_bin,
+        sample_reads_with_seqkit(
+            &seqkit_bin,
             frac,
             total_reads,
             &reads,

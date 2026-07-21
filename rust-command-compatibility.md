@@ -49,6 +49,11 @@ phyluce_workflow
   search behavior. Exhaustive rows are also written to the required output
   path, `--keep-counts` writes its CSV correctly, and Rust adds `--seed` for
   reproducible sampling.
+- `sample-reads-from-files` shells out to `seqkit sample` instead of the
+  Python original's `seqtk sample` (configure `[binaries] seqkit` in
+  `phyluce.conf`). Same seed, different sampled reads -- the two tools'
+  sampling algorithms/RNGs differ, so this isn't a byte-for-byte swap,
+  just an equivalent one.
 - `merge-multiple-gzip-files --trimmed` and `rename-tree-leaves --reroot` are
   implemented. `--reroot` matches DendroPy's `tree.reroot_at_node` semantics,
   including suppressing the unifurcations a naive reroot leaves behind.
