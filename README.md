@@ -42,8 +42,7 @@ phyluce align convert-degen-bases --alignments in --output out
 
 **原版没有、这个版本新增的命令**：
 
-- `probe easy-stampy`：用 [probebwa](https://github.com/GUIBA-EX/probebwa)
-  （stampy 算法的独立 Rust 复刻）替代教程里手动调用的 `stampy.py`，一条命令
+- `probe easy-stampy`：用 [probebwa](https://github.com/GUIBA-EX/probebwa)替代教程里手动调用的 `stampy.py`，一条命令
   跑完建索引、建哈希表、比对三步；已有索引时自动跳过重建，`--bam` 直接产出
   BAM，不用再手动 `samtools view`。
 - `merge-multiple-gzip-files --trimmed` 和 `rename-tree-leaves --reroot`：
