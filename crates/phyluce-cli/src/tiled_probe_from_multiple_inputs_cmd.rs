@@ -191,9 +191,13 @@ pub fn run(
     let hits = sections
         .get("hits")
         .ok_or_else(|| anyhow::anyhow!("no [hits] section in --multi-fasta-output"))?;
-    let mut d: HashMap<String, Vec<LocusMeta>> = hits
+    // `get_names_from_config()` in the Python original returns `[hits]`
+    // entries in config-file order. Keep that order for output instead of
+    // sorting the hash-map keys below.
+    let names: Vec<String> = hits.iter().map(|(name, _)| name.clone()).collect();
+    let mut d: HashMap<String, Vec<LocusMeta>> = names
         .iter()
-        .map(|(name, _)| (name.clone(), Vec::new()))
+        .map(|name| (name.clone(), Vec::new()))
         .collect();
 
     for file in get_fasta_files(fastas_dir)? {
@@ -220,9 +224,7 @@ pub fn run(
     }
 
     let mut probe_set: Vec<Vec<(String, String)>> = Vec::new();
-    let mut names: Vec<&String> = d.keys().collect();
-    names.sort();
-    for locus_name in names {
+    for locus_name in &names {
         probe_set.push(design_probes(locus_name, &d[locus_name], args)?);
     }
 
@@ -252,5 +254,42 @@ mod tests {
         assert!(validate_tiling(120, f64::INFINITY).is_err());
         assert!(validate_tiling(120, 121.0).is_err());
         assert!(validate_tiling(120, 2.0).is_ok());
+    }
+
+    #[test]
+    fn preserves_hits_config_order_in_output() {
+        let dir = std::env::temp_dir().join(format!(
+            "phyluce-tiled-multiple-order-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let fastas = dir.join("fastas");
+        std::fs::create_dir_all(&fastas).unwrap();
+        std::fs::write(
+            fastas.join("taxon.fasta"),
+            ">x|contig:chr1|coords:100-180|locus:1\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n>x|contig:chr2|coords:200-280|locus:2\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n",
+        )
+        .unwrap();
+        let hits = dir.join("hits.conf");
+        std::fs::write(&hits, "[hits]\n2\n1\n").unwrap();
+        let output = dir.join("probes.fasta");
+        let args = TilingArgs {
+            probe_prefix: "uce-".to_string(),
+            designer: "tester".to_string(),
+            design: "test".to_string(),
+            length: 40,
+            density: 2.0,
+            mask: None,
+            remove_ambiguous: true,
+            remove_gc: false,
+            start_index: 1,
+            two_probes: false,
+        };
+
+        run(&fastas, &hits, &output, &args).unwrap();
+        let text = std::fs::read_to_string(&output).unwrap();
+        assert!(text.find(">2_p1").unwrap() < text.find(">1_p1").unwrap());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

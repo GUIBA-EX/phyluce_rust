@@ -81,6 +81,7 @@ mod extract_taxon_fasta_cmd;
 mod filter_alignments_cmd;
 mod filter_bed_cmd;
 mod format_paml_cmd;
+mod full_probes_cmd;
 mod gblocks_cmd;
 mod genome_sequences_from_bed_cmd;
 mod get_fastas_cmd;
@@ -344,6 +345,18 @@ enum ProbeAction {
         probe_length: usize,
         #[arg(long, default_value_t = 2.0)]
         tiling_density: f64,
+        /// Kept for legacy CLI compatibility. The Python implementation
+        /// accepts this option but always uses middle tiling here.
+        #[arg(long, default_value = "middle", value_parser = ["middle", "flush-left"])]
+        overlap: String,
+        /// Kept for legacy CLI compatibility. The Python implementation
+        /// accepts this option but does not write a probe BED in this mode.
+        #[arg(long)]
+        probe_bed: Option<PathBuf>,
+        /// Kept for legacy CLI compatibility. The Python implementation
+        /// accepts this option but does not write a locus BED in this mode.
+        #[arg(long)]
+        locus_bed: Option<PathBuf>,
         #[arg(long)]
         masking: Option<f64>,
         #[arg(
@@ -398,6 +411,15 @@ enum ProbeAction {
         start_index: usize,
         #[arg(long, default_value_t = false)]
         two_probes: bool,
+    },
+    /// Merge overlapping tiled probes into the longest coordinate-supported
+    /// reference per locus/source/chromosome group. Writes one original-style
+    /// FASTA file per locus; intended for GeneMiner2 reference directories.
+    GetFullProbes {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
     },
     /// Equivalent to `phyluce_probe_reconstruct_uce_from_probe`. Multi-probe
     /// loci use MAFFT by default; MUSCLE 3 is available as an explicit legacy
@@ -1825,6 +1847,10 @@ const LEGACY_COMMANDS: &[(&str, &[&str])] = &[
         &["probe", "get-tiled-probes"],
     ),
     (
+        "phyluce_probe_get_full_probes",
+        &["probe", "get-full-probes"],
+    ),
+    (
         "phyluce_probe_query_multi_fasta_table",
         &["probe", "query-multi-fasta-table"],
     ),
@@ -1966,6 +1992,9 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
             design,
             probe_length,
             tiling_density,
+            overlap: _,
+            probe_bed: _,
+            locus_bed: _,
             masking,
             remove_ambiguous,
             remove_gc,
@@ -2028,6 +2057,7 @@ fn run_probe(action: ProbeAction) -> anyhow::Result<()> {
                 &args,
             )
         }
+        ProbeAction::GetFullProbes { input, output } => full_probes_cmd::run(&input, &output),
         ProbeAction::ReconstructUceFromProbe {
             input,
             output,
@@ -3007,7 +3037,9 @@ mod cli_compat_tests {
 
     #[test]
     fn maps_every_legacy_executable() {
-        assert_eq!(LEGACY_COMMANDS.len(), 74);
+        // The original 74 script names plus the Rust-only
+        // `phyluce_probe_get_full_probes` compatibility-style alias.
+        assert_eq!(LEGACY_COMMANDS.len(), 75);
         for (program, prefix) in LEGACY_COMMANDS {
             let mut args = vec!["phyluce"];
             args.extend_from_slice(prefix);

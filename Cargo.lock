@@ -408,7 +408,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "phyluce-align"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "phyluce-config",
@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "phyluce-assembly"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "phyluce-config",
@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "phyluce-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -453,28 +453,28 @@ dependencies = [
 
 [[package]]
 name = "phyluce-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "phyluce-external"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "phyluce-genetrees"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "phyluce-io"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "thiserror 1.0.69",

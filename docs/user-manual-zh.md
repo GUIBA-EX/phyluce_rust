@@ -1083,7 +1083,19 @@ phyluce probe get-tiled-probe-from-multiple-inputs \
 
 注意：`--two-probes` 的 tie 处理在 Rust 中是确定性的，不再使用随机选择。
 
-### 8.8 从 probes 重建 UCE
+### 8.8 生成 GeneMiner2 full probes
+
+```bash
+phyluce probe get-full-probes \
+  --input tiled-probes.fasta \
+  --output ref_uce
+```
+
+命令按 locus、来源、染色体和设计分组，根据 local 坐标拼接重叠 probes，
+每组只保留最长连续序列，并按原版 header 格式写入逐-locus FASTA 文件。
+该过程不使用 MAFFT 或 MUSCLE。
+
+### 8.9 从 probes 重建 UCE
 
 ```bash
 phyluce probe reconstruct-uce-from-probe \
@@ -1103,7 +1115,7 @@ phyluce probe reconstruct-uce-from-probe \
 MUSCLE 3/Clustal alignment 路径时，显式传入
 `--muscle-binary /path/to/muscle`。
 
-### 8.9 2bit / BED / genome sequence 工具
+### 8.10 2bit / BED / genome sequence 工具
 
 从 BED 提取 genome sequence：
 
@@ -1156,7 +1168,7 @@ taxon_x:/path/to/taxon_x.2bit
 --probes 3
 ```
 
-### 8.10 LASTZ probe 命令
+### 8.11 LASTZ probe 命令
 
 简单 LASTZ：
 
@@ -1188,7 +1200,7 @@ phyluce probe run-multiple-lastzs-sqlite \
 临时 FASTA 分块。各分块可以乱序完成，但会按目标顺序合并；完成的 genome 会
 立即流式生成 `.clean` 文件并由主线程逐行写入 SQLite 事务。
 
-### 8.11 用 probebwa 替代 stampy
+### 8.12 用 probebwa 替代 stampy
 
 [probebwa](https://github.com/GUIBA-EX/probebwa) 是 stampy 算法的 Rust
 复刻，CLI 兼容旧版 `stampy.py`。`easy-stampy` 把教程里手动跑的三条命令

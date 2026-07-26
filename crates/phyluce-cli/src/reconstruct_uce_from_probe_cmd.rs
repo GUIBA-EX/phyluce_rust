@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::Context;
@@ -147,6 +147,26 @@ pub fn run(
         d.entry(locus).or_default().push(record);
     }
 
+    // Validate all data-derived filenames before creating either output.
+    // FASTA IDs are user input, so a locus such as "../../outside" must not
+    // be allowed to escape `per_locus_dir` when joined below.
+    let per_locus_paths: Option<Vec<PathBuf>> = per_locus_dir
+        .map(|dir| {
+            buckets
+                .iter()
+                .map(|locus| {
+                    let filename = format!("{locus}.fasta");
+                    crate::output_path::output_file(dir, &filename).with_context(|| {
+                        format!(
+                            "building safe per-locus output filename for locus {locus:?} in {}",
+                            dir.display()
+                        )
+                    })
+                })
+                .collect()
+        })
+        .transpose()?;
+
     let mut out = std::fs::File::create(output)
         .with_context(|| format!("creating output file {}", output.display()))?;
     if let Some(dir) = per_locus_dir {
@@ -154,7 +174,7 @@ pub fn run(
             .with_context(|| format!("creating per-locus output directory {}", dir.display()))?;
     }
     let mut count = 0usize;
-    for locus in &buckets {
+    for (index, locus) in buckets.iter().enumerate() {
         let recs = &d[locus];
         let sequence = if recs.len() > 1 {
             let seqs = if let Some(muscle_bin) = muscle_bin {
@@ -181,12 +201,12 @@ pub fn run(
             recs[0].sequence.clone()
         };
         writeln!(out, ">{locus}\n{sequence}")?;
-        if let Some(dir) = per_locus_dir {
+        if let Some(paths) = &per_locus_paths {
             // One unwrapped, single-record FASTA per locus, named to match
             // GeneMiner2-UCE's `-r` reference-directory convention
             // (`<locus>.fasta`, e.g. `uce-0.fasta`).
-            let locus_path = dir.join(format!("{locus}.fasta"));
-            std::fs::write(&locus_path, format!(">{locus}\n{sequence}\n"))
+            let locus_path = &paths[index];
+            std::fs::write(locus_path, format!(">{locus}\n{sequence}\n"))
                 .with_context(|| format!("writing per-locus FASTA {}", locus_path.display()))?;
         }
         count += 1;
@@ -233,6 +253,27 @@ mod tests {
         assert_eq!(uce1, ">uce-1\nACGTACGT\n");
         let uce2 = std::fs::read_to_string(per_locus_dir.join("uce-2.fasta")).unwrap();
         assert_eq!(uce2, ">uce-2\nTTTTGGGG\n");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn per_locus_dir_rejects_path_traversal_in_locus_name_before_writing() {
+        let dir = std::env::temp_dir().join(format!(
+            "phyluce-reconstruct-unsafe-locus-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("probes.fasta");
+        std::fs::write(&input, ">../../outside\nACGT\n").unwrap();
+        let output = dir.join("combined.fasta");
+        let per_locus_dir = dir.join("per_locus");
+
+        let error = run(&input, &output, None, None, Some(&per_locus_dir)).unwrap_err();
+        assert!(format!("{error:#}").contains("unsafe output filename"));
+        assert!(!output.exists());
+        assert!(!per_locus_dir.exists());
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

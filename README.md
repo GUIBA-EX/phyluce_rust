@@ -47,6 +47,8 @@ phyluce align convert-degen-bases --alignments in --output out
 
 **新增命令**（原版没有）：
 
+- [`probe get-full-probes`](#生成-geneminer2-参考序列)：从原版 probe FASTA
+  生成 GeneMiner2 逐-locus 参考目录。
 - `probe easy-stampy`：以 [probebwa](https://github.com/GUIBA-EX/probebwa)
   替代教程中手动调用的 `stampy.py`，一条命令完成建索引、建哈希表、比对三
   步；索引已存在时自动跳过重建，`--bam` 直接输出 BAM，无需再手动调用
@@ -96,6 +98,18 @@ target/release/phyluce --version
 target/release/phyluce --help
 target/release/phyluce config inspect
 ```
+
+## 生成 GeneMiner2 参考序列
+
+```bash
+phyluce probe get-full-probes \
+  --input probes.fasta \
+  --output ref_uce
+```
+
+输入须为原版 probe FASTA，header 中包含 local/global 坐标，序列仅含 A/C/G/T。
+命令按坐标拼接重叠 probe，每组保留最长有效连续序列，并在输出目录中为每个
+locus 写一个 FASTA 文件。输出目录须不存在或为空。不使用 MUSCLE 或 MAFFT。
 
 ## 开发检查
 

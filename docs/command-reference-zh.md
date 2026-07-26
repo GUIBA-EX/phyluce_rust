@@ -58,12 +58,13 @@
 | `assembly match-contigs-to-probes` | `phyluce_assembly_match_contigs_to_probes` | 在一批组装好的 contig 里搜索跟 UCE bait/probe 匹配的部分。 |
 | `assembly screen-probes-for-dupes` | `phyluce_assembly_screen_probes_for_dupes` | 检查 probe/bait 文件里是否存在潜在重复。 |
 
-## probe（19 个，含 Rust 版新增的 `easy-stampy`）
+## probe（20 个，含 Rust 版新增命令）
 
 | 新命令 | 旧脚本名 | 说明 |
 | --- | --- | --- |
 | `probe easy-lastz` | `phyluce_probe_easy_lastz` | 用一条命令跑一次"简易" LASTZ 比对（一个文件对另一个文件）。 |
 | `probe easy-stampy` | *（无，Rust 版新增）* | 用 [probebwa](https://github.com/GUIBA-EX/probebwa) 替代教程里手动调用的 `stampy.py`，一条命令跑完建索引、建哈希表、比对三步。 |
+| `probe get-full-probes` | `phyluce_probe_get_full_probes` | 按 locus、来源和染色体坐标拼接重叠 probes，每组保留最长连续序列，并输出 GeneMiner2 可直接使用的逐-locus FASTA 目录。 |
 | `probe get-genome-sequences-from-bed` | `phyluce_probe_get_genome_sequences_from_bed` | 按 BED 文件里的坐标，从基因组中抽取对应 FASTA 序列。 |
 | `probe get-locus-bed-from-lastz-files` | `phyluce_probe_get_locus_bed_from_lastz_files` | 把 bait 对基因组的 LASTZ 结果转成 **locus** 坐标的 BED 文件。 |
 | `probe get-multi-fasta-table` | `phyluce_probe_get_multi_fasta_table` | 生成一张多路 FASTA 信息表。 |

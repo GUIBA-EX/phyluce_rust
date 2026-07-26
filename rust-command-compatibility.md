@@ -47,6 +47,10 @@ phyluce_workflow
   the usual combined `--output` FASTA, also writes one unwrapped,
   single-record FASTA file per locus (`<locus>.fasta`) into `DIR` -- the
   reference-directory layout GeneMiner2-UCE's `-r` flag expects.
+- `get-full-probes` / `phyluce_probe_get_full_probes` is a Rust-only addition.
+  It coordinate-stitches overlapping probes within each
+  locus/source/chromosome/design group, keeps the longest contiguous result,
+  and writes one original-header-style FASTA file per locus for GeneMiner2.
 - `prep-uce-align-files-for-ncbi` (`phyluce_ncbi_prep_uce_align_files_for_ncbi`)
   crashes on import against modern Biopython (`from Bio.Alphabet import IUPAC`
   -- `Bio.Alphabet` was removed). This port matches its intended behavior
