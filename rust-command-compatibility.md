@@ -96,6 +96,26 @@ phyluce_workflow
   and prints one aggregated warning per taxon (not per contig). Add a
   custom `[headers]` pattern if the fallback's guess is wrong for your data.
 
+- `convert-one-align-to-another --shorten-names` and `--name-conf` are supported.
+  Automatic mappings cover the sorted union of taxa across all input alignments,
+  rather than only the first alignment. Colliding short names get numeric suffixes
+  starting at 0; this fixes upstream's collision check against full-name keys.
+  Configured `[taxa]` mappings preserve case and reject missing taxa, duplicate
+  keys/short names, and empty or whitespace-containing short names before output
+  is created. As upstream, `--name-conf` alone does not enable renaming.
+
+- `match-contigs-to-probes --cores N` adds bounded sample-level parallelism
+  (default 1). SQLite, CSV and duplicate reports retain sorted sample order.
+  `--resume` validates content fingerprints before reusing LASTZ results and
+  rebuilds the database/reports with current filters; it conflicts with
+  `--force` and `--skip-alignment`. Completion markers are created only in
+  resume mode, after successful execution and parsing. `--lastz-binary` can
+  override the configured executable. Failed subprocesses do not publish
+  partial LASTZ outputs.
+- FASTA extraction and length collection now stream records. Extraction still
+  drains each input to check trailing read/decompression errors, and preserves
+  the existing record order, wrapping and missing-locus report.
+
 ## Logging
 
 The Rust CLI accepts global logging flags on every command:

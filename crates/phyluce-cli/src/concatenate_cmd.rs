@@ -1,9 +1,9 @@
 //! CLI wiring for `phyluce align concatenate-alignments`, mirroring
-//! `phyluce_align_concatenate_alignments` with a disk-backed matrix.
+//! `phyluce_align_concatenate_alignments` with a budgeted in-memory or disk-backed matrix.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -22,10 +22,240 @@ struct ScratchMatrix {
 
 struct ConcatenationMetadata {
     taxa: Vec<String>,
-    taxon_index: HashMap<String, usize>,
     charsets: Vec<Charset>,
-    locus_taxa: Vec<HashSet<String>>,
+    cached: Option<Vec<PackedLocus>>,
+    spool: Option<Spool>,
     total_length: usize,
+}
+
+// Internal one-pass snapshot, removed automatically on success or failure.
+struct Spool {
+    scratch: ScratchMatrix,
+    rows: Vec<Vec<DiskFragment>>,
+    bytes: u64,
+}
+
+impl Spool {
+    fn append<'a>(
+        &mut self,
+        start: usize,
+        rows: impl Iterator<Item = (usize, &'a [u8])>,
+    ) -> anyhow::Result<()> {
+        let mut writer = BufWriter::new(&mut self.scratch.file);
+        for (taxon, sequence) in rows {
+            if self.rows.len() <= taxon {
+                self.rows.resize_with(taxon + 1, Vec::new);
+            }
+            self.rows[taxon].push(DiskFragment {
+                start,
+                offset: self.bytes,
+                length: sequence.len(),
+            });
+            writer.write_all(sequence)?;
+            self.bytes = self
+                .bytes
+                .checked_add(sequence.len() as u64)
+                .context("snapshot size overflow")?;
+        }
+        writer.flush()?;
+        Ok(())
+    }
+}
+
+struct DiskFragment {
+    start: usize,
+    offset: u64,
+    length: usize,
+}
+
+// Virtual dense matrix over a sparse, append-only snapshot. Missing cells
+// never occupy temporary disk space, and no matrix writes are necessary.
+struct DiskMatrix {
+    spool: Spool,
+    width: usize,
+    taxa: usize,
+    position: u64,
+}
+
+impl Read for DiskMatrix {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        let size = self.taxa * self.width;
+        let start = usize::try_from(self.position).unwrap_or(usize::MAX);
+        let count = bytes.len().min(size.saturating_sub(start));
+        bytes[..count].fill(b'?');
+        let mut copied = 0;
+        while copied < count {
+            let offset = start + copied;
+            let column = offset % self.width;
+            let length = (self.width - column).min(count - copied);
+            if let Some(row) = self.spool.rows.get(offset / self.width) {
+                let first =
+                    row.partition_point(|fragment| fragment.start + fragment.length <= column);
+                for fragment in &row[first..] {
+                    if fragment.start >= column + length {
+                        break;
+                    }
+                    let left = column.max(fragment.start);
+                    let right = (column + length).min(fragment.start + fragment.length);
+                    let source = fragment.offset + (left - fragment.start) as u64;
+                    let target = &mut bytes[copied + left - column..copied + right - column];
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::FileExt;
+                        self.spool.scratch.file.read_exact_at(target, source)?;
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        self.spool.scratch.file.seek(SeekFrom::Start(source))?;
+                        self.spool.scratch.file.read_exact(target)?;
+                    }
+                }
+            }
+            copied += length;
+        }
+        self.position += count as u64;
+        Ok(count)
+    }
+}
+
+impl Seek for DiskMatrix {
+    fn seek(&mut self, from: SeekFrom) -> std::io::Result<u64> {
+        let next = match from {
+            SeekFrom::Start(position) => Some(position),
+            SeekFrom::Current(offset) => self.position.checked_add_signed(offset),
+            SeekFrom::End(offset) => ((self.taxa * self.width) as u64).checked_add_signed(offset),
+        }
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid matrix seek")
+        })?;
+        self.position = next;
+        Ok(next)
+    }
+}
+
+// One sequence allocation per locus, with global taxon indices in row order.
+struct PackedLocus {
+    taxa: Box<[usize]>,
+    sequence: Box<[u8]>,
+    width: usize,
+}
+
+struct Fragment {
+    start: usize,
+    locus: usize,
+    offset: usize,
+    length: usize,
+}
+
+enum Matrix {
+    Memory(Cursor<Vec<u8>>),
+    Disk(DiskMatrix),
+    Cached(CachedMatrix),
+}
+
+// Sparse taxon rows retain only observed sequence blocks; missing cells are
+// generated during reads. No second, dense matrix allocation is necessary.
+struct CachedMatrix {
+    rows: Vec<Vec<Fragment>>,
+    loci: Vec<PackedLocus>,
+    width: usize,
+    position: u64,
+}
+
+impl CachedMatrix {
+    fn new(metadata: &ConcatenationMetadata, loci: Vec<PackedLocus>) -> Self {
+        let mut counts = vec![0; metadata.taxa.len()];
+        for locus in &loci {
+            for &taxon in &locus.taxa {
+                counts[taxon] += 1;
+            }
+        }
+        let mut rows: Vec<Vec<Fragment>> = counts.into_iter().map(Vec::with_capacity).collect();
+        for (index, (locus, charset)) in loci.iter().zip(&metadata.charsets).enumerate() {
+            for (row, &taxon) in locus.taxa.iter().enumerate() {
+                rows[taxon].push(Fragment {
+                    start: charset.start,
+                    locus: index,
+                    offset: row * locus.width,
+                    length: locus.width,
+                });
+            }
+        }
+        Self {
+            rows,
+            loci,
+            width: metadata.total_length,
+            position: 0,
+        }
+    }
+}
+
+impl Read for CachedMatrix {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        let size = self.rows.len() * self.width;
+        let start = usize::try_from(self.position).unwrap_or(usize::MAX);
+        let count = bytes.len().min(size.saturating_sub(start));
+        bytes[..count].fill(b'?');
+        let mut copied = 0;
+        while copied < count {
+            let offset = start + copied;
+            let column = offset % self.width;
+            let length = (self.width - column).min(count - copied);
+            let row = &self.rows[offset / self.width];
+            let first = row.partition_point(|fragment| fragment.start + fragment.length <= column);
+            for fragment in &row[first..] {
+                let begin = fragment.start;
+                if begin >= column + length {
+                    break;
+                }
+                let left = column.max(begin);
+                let right = (column + length).min(begin + fragment.length);
+                let sequence = &self.loci[fragment.locus].sequence;
+                bytes[copied + left - column..copied + right - column].copy_from_slice(
+                    &sequence[fragment.offset + left - begin..fragment.offset + right - begin],
+                );
+            }
+            copied += length;
+        }
+        self.position += count as u64;
+        Ok(count)
+    }
+}
+
+impl Seek for CachedMatrix {
+    fn seek(&mut self, from: SeekFrom) -> std::io::Result<u64> {
+        let next = match from {
+            SeekFrom::Start(position) => Some(position),
+            SeekFrom::Current(offset) => self.position.checked_add_signed(offset),
+            SeekFrom::End(offset) => {
+                ((self.rows.len() * self.width) as u64).checked_add_signed(offset)
+            }
+        }
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid matrix seek")
+        })?;
+        self.position = next;
+        Ok(next)
+    }
+}
+
+impl Read for Matrix {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Memory(matrix) => matrix.read(bytes),
+            Self::Cached(matrix) => matrix.read(bytes),
+            Self::Disk(matrix) => matrix.read(bytes),
+        }
+    }
+}
+impl Seek for Matrix {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        match self {
+            Self::Memory(matrix) => matrix.seek(position),
+            Self::Cached(matrix) => matrix.seek(position),
+            Self::Disk(matrix) => matrix.seek(position),
+        }
+    }
 }
 
 impl Drop for ScratchMatrix {
@@ -58,12 +288,15 @@ fn create_scratch_matrix() -> anyhow::Result<ScratchMatrix> {
 fn collect_metadata(
     files: &[PathBuf],
     input_format: &str,
+    budget: usize,
 ) -> anyhow::Result<ConcatenationMetadata> {
     let mut taxa = Vec::new();
     let mut taxon_index = HashMap::new();
     let mut charsets = Vec::with_capacity(files.len());
-    let mut locus_taxa = Vec::with_capacity(files.len());
+    let mut spool: Option<Spool> = None;
     let mut total_length = 0usize;
+    let mut cached = Some(Vec::new());
+    let mut cached_size = 0usize;
 
     for file in files {
         let alignment = load_alignment(file, input_format)
@@ -74,7 +307,6 @@ fn collect_metadata(
                 taxa.push(row.id.clone());
             }
         }
-        locus_taxa.push(alignment.rows.iter().map(|row| row.id.clone()).collect());
         let stop = total_length
             .checked_add(alignment.nchar())
             .ok_or_else(|| anyhow::anyhow!("concatenated alignment length overflow"))?;
@@ -88,85 +320,116 @@ fn collect_metadata(
             stop,
         });
         total_length = stop;
+        let _matrix_size = taxa
+            .len()
+            .checked_mul(total_length)
+            .context("concatenated matrix size overflow")?;
+        if let Some(alignments) = &mut cached {
+            let width = alignment.nchar();
+            let count = alignment.rows.len();
+            // Include the packed data, taxon indices and eventual row fragments.
+            let bytes = count.checked_mul(width);
+            let next = count
+                .checked_mul(std::mem::size_of::<usize>() + std::mem::size_of::<Fragment>())
+                .and_then(|n| n.checked_add(bytes?))
+                .and_then(|n| n.checked_add(std::mem::size_of::<PackedLocus>()))
+                .and_then(|n| cached_size.checked_add(n));
+            if next.is_some_and(|size| size <= budget) {
+                let mut sequence = Vec::with_capacity(bytes.unwrap());
+                let mut indices = Vec::with_capacity(count);
+                for row in &alignment.rows {
+                    indices.push(taxon_index[&row.id]);
+                    sequence.extend_from_slice(&row.seq);
+                }
+                cached_size = next.unwrap();
+                alignments.push(PackedLocus {
+                    taxa: indices.into_boxed_slice(),
+                    sequence: sequence.into_boxed_slice(),
+                    width,
+                });
+            } else {
+                let mut disk = Spool {
+                    scratch: create_scratch_matrix()?,
+                    rows: Vec::new(),
+                    bytes: 0,
+                };
+                for (locus, charset) in cached.take().unwrap().into_iter().zip(&charsets) {
+                    disk.append(
+                        charset.start,
+                        locus.taxa.iter().enumerate().map(|(row, &taxon)| {
+                            (
+                                taxon,
+                                &locus.sequence[row * locus.width..(row + 1) * locus.width],
+                            )
+                        }),
+                    )?;
+                }
+                spool = Some(disk);
+            }
+        }
+        if let Some(disk) = &mut spool {
+            disk.append(
+                charsets.last().unwrap().start,
+                alignment
+                    .rows
+                    .iter()
+                    .map(|row| (taxon_index[&row.id], row.seq.as_slice())),
+            )?;
+        }
     }
     Ok(ConcatenationMetadata {
         taxa,
-        taxon_index,
         charsets,
-        locus_taxa,
+        cached,
+        spool,
         total_length,
     })
 }
 
-fn initialize_missing_matrix(
-    scratch: &mut File,
-    taxa: usize,
-    total_length: usize,
-) -> anyhow::Result<()> {
-    let matrix_size = taxa
-        .checked_mul(total_length)
-        .ok_or_else(|| anyhow::anyhow!("concatenated matrix size overflow"))?;
-    let missing = [b'?'; 64 * 1024];
-    let mut remaining = matrix_size;
-    while remaining > 0 {
-        let count = remaining.min(missing.len());
-        scratch.write_all(&missing[..count])?;
-        remaining -= count;
+fn spilled_matrix(metadata: &mut ConcatenationMetadata, budget: usize) -> anyhow::Result<Matrix> {
+    let size = metadata.taxa.len() * metadata.total_length;
+    let mut bytes = Vec::new();
+    if budget > 0 && size <= budget && bytes.try_reserve_exact(size).is_ok() {
+        bytes.resize(size, b'?');
+        let mut spool = metadata
+            .spool
+            .take()
+            .context("missing concatenation snapshot")?;
+        // Revisit the append order for sequential disk reads. These references
+        // are temporary and do not duplicate sequence data.
+        let mut fragments: Vec<_> = spool
+            .rows
+            .iter()
+            .enumerate()
+            .flat_map(|(taxon, row)| row.iter().map(move |fragment| (taxon, fragment)))
+            .collect();
+        fragments.sort_unstable_by_key(|(_, fragment)| fragment.offset);
+        spool.scratch.file.seek(SeekFrom::Start(0))?;
+        let mut reader = BufReader::new(&mut spool.scratch.file);
+        for (taxon, fragment) in fragments {
+            let offset = taxon * metadata.total_length + fragment.start;
+            reader.read_exact(&mut bytes[offset..offset + fragment.length])?;
+        }
+        Ok(Matrix::Memory(Cursor::new(bytes)))
+    } else {
+        disk_matrix(metadata)
     }
-    scratch.flush()?;
-    Ok(())
 }
 
-fn populate_matrix(
-    scratch: &mut File,
-    files: &[PathBuf],
-    input_format: &str,
-    taxon_index: &HashMap<String, usize>,
-    charsets: &[Charset],
-    locus_taxa: &[HashSet<String>],
-    total_length: usize,
-) -> anyhow::Result<()> {
-    for ((file, charset), expected_taxa) in files.iter().zip(charsets).zip(locus_taxa) {
-        let alignment = load_alignment(file, input_format)
-            .with_context(|| format!("loading alignment {}", file.display()))?;
-        let expected_length = charset.stop - charset.start;
-        anyhow::ensure!(
-            alignment.nchar() == expected_length,
-            "alignment {} changed between concatenation passes: expected {expected_length} characters, found {}",
-            file.display(),
-            alignment.nchar()
-        );
-        let actual_taxa: HashSet<&str> = alignment.rows.iter().map(|row| row.id.as_str()).collect();
-        anyhow::ensure!(
-            actual_taxa.len() == expected_taxa.len()
-                && expected_taxa
-                    .iter()
-                    .all(|taxon| actual_taxa.contains(taxon.as_str())),
-            "alignment {} changed taxon membership between concatenation passes",
-            file.display()
-        );
-        for row in alignment.rows {
-            let row_index = *taxon_index.get(&row.id).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "alignment {} introduced taxon {:?} between concatenation passes",
-                    file.display(),
-                    row.id
-                )
-            })?;
-            let offset = row_index
-                .checked_mul(total_length)
-                .and_then(|value| value.checked_add(charset.start))
-                .ok_or_else(|| anyhow::anyhow!("concatenated matrix offset overflow"))?;
-            scratch.seek(SeekFrom::Start(offset as u64))?;
-            scratch.write_all(&row.seq)?;
-        }
-    }
-    scratch.flush()?;
-    Ok(())
+fn disk_matrix(metadata: &mut ConcatenationMetadata) -> anyhow::Result<Matrix> {
+    Ok(Matrix::Disk(DiskMatrix {
+        spool: metadata
+            .spool
+            .take()
+            .context("missing concatenation snapshot")?,
+        width: metadata.total_length,
+        taxa: metadata.taxa.len(),
+        position: 0,
+    }))
 }
 
 fn copy_taxon_sequence(
-    scratch: &mut File,
+    scratch: &mut (impl Read + Seek),
     output: &mut impl Write,
     taxon_index: usize,
     total_length: usize,
@@ -181,7 +444,7 @@ fn copy_taxon_sequence(
 
 fn write_phylip(
     path: &Path,
-    scratch: &mut File,
+    scratch: &mut (impl Read + Seek),
     taxa: &[String],
     total_length: usize,
 ) -> anyhow::Result<()> {
@@ -201,7 +464,7 @@ fn write_phylip(
 
 fn write_nexus(
     path: &Path,
-    scratch: &mut File,
+    scratch: &mut (impl Read + Seek),
     taxa: &[String],
     total_length: usize,
     charsets: &[Charset],
@@ -245,6 +508,7 @@ pub fn run(
     output_dir: &Path,
     as_nexus: bool,
     as_phylip: bool,
+    memory_limit_mb: usize,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         as_nexus != as_phylip,
@@ -256,22 +520,26 @@ pub fn run(
     let mut files = find_alignment_files(alignments_dir, input_format)
         .with_context(|| format!("reading alignments directory {}", alignments_dir.display()))?;
     files.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
-    let metadata = collect_metadata(&files, input_format)?;
-    let mut scratch = create_scratch_matrix()?;
-    initialize_missing_matrix(
-        &mut scratch.file,
-        metadata.taxa.len(),
-        metadata.total_length,
-    )?;
-    populate_matrix(
-        &mut scratch.file,
-        &files,
-        input_format,
-        &metadata.taxon_index,
-        &metadata.charsets,
-        &metadata.locus_taxa,
-        metadata.total_length,
-    )?;
+    let budget = memory_limit_mb
+        .checked_mul(1024 * 1024)
+        .context("memory budget overflow")?;
+    let mut metadata = collect_metadata(&files, input_format, budget)?;
+    let size = metadata
+        .taxa
+        .len()
+        .checked_mul(metadata.total_length)
+        .context("concatenated matrix size overflow")?;
+    let mut matrix = if let Some(cached) = metadata.cached.take() {
+        Matrix::Cached(CachedMatrix::new(&metadata, cached))
+    } else {
+        spilled_matrix(&mut metadata, budget)?
+    };
+    tracing::info!(
+        matrix_bytes = size,
+        cached_inputs = matches!(&matrix, Matrix::Cached(_)),
+        in_memory = !matches!(&matrix, Matrix::Disk(_)),
+        "concatenation storage"
+    );
 
     let output_name = output_dir
         .file_name()
@@ -280,7 +548,7 @@ pub fn run(
     if as_phylip {
         write_phylip(
             &output_dir.join(format!("{output_name}.phylip")),
-            &mut scratch.file,
+            &mut matrix,
             &metadata.taxa,
             metadata.total_length,
         )?;
@@ -290,7 +558,7 @@ pub fn run(
     } else {
         write_nexus(
             &output_dir.join(format!("{output_name}.nexus")),
-            &mut scratch.file,
+            &mut matrix,
             &metadata.taxa,
             metadata.total_length,
             &metadata.charsets,
@@ -304,7 +572,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_alignment_changes_between_passes() {
+    fn cached_and_disk_matrices_match_with_missing_taxa() {
+        let root = std::env::temp_dir().join(format!("phyluce-cache-test-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let files = vec![root.join("a.fasta"), root.join("b.fasta")];
+        std::fs::write(&files[0], ">z\nAC\n>a\nGT\n").unwrap();
+        std::fs::write(&files[1], ">b\nAAA\n>z\nCCC\n").unwrap();
+        let mut metadata = collect_metadata(&files, "fasta", 1024 * 1024).unwrap();
+        let cached = metadata.cached.take().unwrap();
+        let mut sparse = CachedMatrix::new(&metadata, cached);
+        let expected = b"ACCCCGT?????AAA";
+        for start in 0..=expected.len() {
+            sparse.seek(SeekFrom::Start(start as u64)).unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 3];
+            loop {
+                let n = sparse.read(&mut buffer).unwrap();
+                if n == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..n]);
+            }
+            assert_eq!(bytes, expected[start..]);
+        }
+        assert!(sparse.seek(SeekFrom::End(-16)).is_err());
+        sparse.seek(SeekFrom::End(10)).unwrap();
+        assert_eq!(sparse.read(&mut [0; 1]).unwrap(), 0);
+        for budget in [0, 15, 150, 1024 * 1024] {
+            let mut metadata = collect_metadata(&files, "fasta", budget).unwrap();
+            assert_eq!(metadata.cached.is_some(), budget > 150);
+            let cached = metadata.cached.take();
+            if cached.is_some() {
+                for file in &files {
+                    std::fs::remove_file(file).unwrap();
+                }
+            }
+            let mut matrix = if let Some(cached) = cached {
+                Matrix::Cached(CachedMatrix::new(&metadata, cached))
+            } else {
+                spilled_matrix(&mut metadata, budget).unwrap()
+            };
+            matrix.seek(SeekFrom::Start(0)).unwrap();
+            let mut data = Vec::new();
+            matrix.read_to_end(&mut data).unwrap();
+            assert_eq!(data, b"ACCCCGT?????AAA");
+            for start in 0..=data.len() {
+                matrix.seek(SeekFrom::Start(start as u64)).unwrap();
+                let mut small = [0; 3];
+                let count = matrix.read(&mut small).unwrap();
+                assert_eq!(&small[..count], &data[start..(start + 3).min(data.len())]);
+            }
+            assert!(matrix.seek(SeekFrom::End(-16)).is_err());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn snapshot_survives_input_removal_and_rejects_truncation() {
         let root =
             std::env::temp_dir().join(format!("phyluce-concat-consistency-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -312,29 +636,33 @@ mod tests {
         let input = root.join("locus.fasta");
         std::fs::write(&input, ">a\nAAAA\n>b\nAAAA\n").unwrap();
         let files = vec![input.clone()];
-        let metadata = collect_metadata(&files, "fasta").unwrap();
-        let mut scratch = create_scratch_matrix().unwrap();
-        initialize_missing_matrix(
-            &mut scratch.file,
-            metadata.taxa.len(),
-            metadata.total_length,
-        )
-        .unwrap();
-
-        std::fs::write(&input, ">a\nAA\n>b\nAA\n").unwrap();
-        let error = populate_matrix(
-            &mut scratch.file,
-            &files,
-            "fasta",
-            &metadata.taxon_index,
-            &metadata.charsets,
-            &metadata.locus_taxa,
-            metadata.total_length,
-        )
-        .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("changed between concatenation passes"));
+        let mut metadata = collect_metadata(&files, "fasta", 0).unwrap();
+        let mut broken = collect_metadata(&files, "fasta", 0).unwrap();
+        let snapshot_path = metadata.spool.as_ref().unwrap().scratch.path.clone();
+        std::fs::remove_file(input).unwrap();
+        let mut matrix = disk_matrix(&mut metadata).unwrap();
+        let mut bytes = Vec::new();
+        matrix.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"AAAAAAAA");
+        assert_eq!(std::fs::metadata(&snapshot_path).unwrap().len(), 8);
+        drop(matrix);
+        assert!(!snapshot_path.exists());
+        broken
+            .spool
+            .as_mut()
+            .unwrap()
+            .scratch
+            .file
+            .set_len(2)
+            .unwrap();
+        let broken_path = broken.spool.as_ref().unwrap().scratch.path.clone();
+        let mut matrix = disk_matrix(&mut broken).unwrap();
+        assert_eq!(
+            matrix.read_to_end(&mut Vec::new()).unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
+        drop(matrix);
+        assert!(!broken_path.exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

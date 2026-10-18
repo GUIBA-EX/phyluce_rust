@@ -616,27 +616,28 @@ pub mod db {
     ) -> Result<(), MatchError> {
         let column = ident(critter);
         let tx = conn.unchecked_transaction()?;
-        for (contig, uces) in matches {
-            let Some(uce) = uces.iter().next().filter(|_| uces.len() == 1) else {
-                return Err(MatchError::InvalidFilteredMatchCount {
-                    contig: contig.clone(),
-                    count: uces.len(),
-                });
-            };
-            tx.execute(
-                &format!("UPDATE matches SET {column} = 1 WHERE uce = ?1"),
-                [uce],
-            )?;
-            let strand = orientation
-                .get(uce)
-                .and_then(|s| s.iter().next())
-                .cloned()
-                .unwrap_or_default();
-            let orient_value = format!("{contig}({strand})");
-            tx.execute(
-                &format!("UPDATE match_map SET {column} = ?1 WHERE uce = ?2"),
-                rusqlite::params![orient_value, uce],
-            )?;
+        {
+            let mut update_matches =
+                tx.prepare(&format!("UPDATE matches SET {column} = 1 WHERE uce = ?1"))?;
+            let mut update_map = tx.prepare(&format!(
+                "UPDATE match_map SET {column} = ?1 WHERE uce = ?2"
+            ))?;
+            for (contig, uces) in matches {
+                let Some(uce) = uces.iter().next().filter(|_| uces.len() == 1) else {
+                    return Err(MatchError::InvalidFilteredMatchCount {
+                        contig: contig.clone(),
+                        count: uces.len(),
+                    });
+                };
+                update_matches.execute([uce])?;
+                let strand = orientation
+                    .get(uce)
+                    .and_then(|s| s.iter().next())
+                    .cloned()
+                    .unwrap_or_default();
+                let orient_value = format!("{contig}({strand})");
+                update_map.execute(rusqlite::params![orient_value, uce])?;
+            }
         }
         tx.commit()?;
         Ok(())

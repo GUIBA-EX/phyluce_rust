@@ -7,6 +7,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = [
+    "check_convert_names.py",
+    "check_parallel_resume.py",
+    "check_streaming_extraction.py",
     "compare_match_contigs_to_probes.py",
     "compare_get_match_counts.py",
     "compare_get_fastas_from_match_counts.py",

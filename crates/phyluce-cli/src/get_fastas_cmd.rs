@@ -2,6 +2,7 @@
 //! `phyluce_assembly_get_fastas_from_match_counts`.
 
 use std::collections::HashSet;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -12,7 +13,7 @@ use phyluce_assembly::get_fastas::{
 use phyluce_assembly::match_counts::read_taxon_list_config;
 use phyluce_assembly::{contig_header_regex, extract_contig_name_lenient};
 use phyluce_config::PhyluceConfig;
-use phyluce_io::{read_fasta, write_fasta_record};
+use phyluce_io::{iter_fasta, write_fasta_record};
 use rusqlite::Connection;
 
 #[allow(clippy::too_many_arguments)]
@@ -70,16 +71,17 @@ pub fn run(
     let header_regex = contig_header_regex(&header_fragments)?;
     let node_regex = node_with_strand_regex(&header_fragments)?;
 
-    let mut incomplete_writer =
-        match &incomplete_matrix_out {
-            Some(p) => Some(std::fs::File::create(p).with_context(|| {
-                format!("creating incomplete matrix output file {}", p.display())
-            })?),
-            None => None,
-        };
+    let mut incomplete_writer = match &incomplete_matrix_out {
+        Some(p) => Some(BufWriter::new(std::fs::File::create(p).with_context(
+            || format!("creating incomplete matrix output file {}", p.display()),
+        )?)),
+        None => None,
+    };
 
-    let mut out = std::fs::File::create(output)
-        .with_context(|| format!("creating output file {}", output.display()))?;
+    let mut out = BufWriter::new(
+        std::fs::File::create(output)
+            .with_context(|| format!("creating output file {}", output.display()))?,
+    );
     let uces_all: HashSet<String> = uces.iter().cloned().collect();
 
     for organism in &organisms {
@@ -115,17 +117,20 @@ pub fn run(
         crate::cli_info!("There are {} UCE loci for {organism}", node_dict.len());
         crate::cli_info!("Parsing and renaming contigs for {organism}");
 
-        let node_dict_set: HashSet<&String> = node_dict.keys().collect();
         let mut nodes_written: HashSet<String> = HashSet::new();
         let mut written: Vec<String> = Vec::new();
         let mut n_replace_count = 0usize;
         let mut header_fallback_count = 0usize;
 
-        let records = read_fasta(&reads)
+        let records = iter_fasta(&reads)
             .with_context(|| format!("reading contigs fasta {}", reads.display()))?;
-        for record in &records {
-            if nodes_written.len() == node_dict_set.len() {
-                break;
+        for record in records {
+            let record =
+                record.with_context(|| format!("reading contigs fasta {}", reads.display()))?;
+            // Drain the stream even after finding all matches, preserving the
+            // former full-read validation of trailing UTF-8 and gzip data.
+            if nodes_written.len() == node_dict.len() {
+                continue;
             }
             let (contig_name, used_fallback) =
                 extract_contig_name_lenient(&record.id, &header_regex)?;
@@ -180,6 +185,13 @@ pub fn run(
             written_set == uces_all,
             "UCE names do not match for organism {organism}"
         );
+    }
+    out.flush()
+        .with_context(|| format!("flushing output {}", output.display()))?;
+    if let Some(writer) = incomplete_writer.as_mut() {
+        writer
+            .flush()
+            .context("flushing incomplete matrix report")?;
     }
     Ok(())
 }

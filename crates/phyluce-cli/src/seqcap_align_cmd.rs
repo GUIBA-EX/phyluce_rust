@@ -11,7 +11,7 @@ use phyluce_align::nexus::format_nexus;
 use phyluce_align::trim::{trim_alignment_running, validate_trim_parameters};
 use phyluce_align::Alignment;
 use phyluce_config::PhyluceConfig;
-use phyluce_io::read_fasta;
+use phyluce_io::iter_fasta;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -39,9 +39,10 @@ pub fn run(
     }
 
     let records =
-        read_fasta(input).with_context(|| format!("reading input FASTA {}", input.display()))?;
+        iter_fasta(input).with_context(|| format!("reading input FASTA {}", input.display()))?;
     let mut loci: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for record in records {
+        let record = record.with_context(|| format!("reading input FASTA {}", input.display()))?;
         // mirrors `record.description.split("|")[1].rstrip("_phased")`
         let locus = record
             .description
@@ -80,29 +81,34 @@ pub fn run(
 
     let mut work: Vec<(String, Vec<(String, String)>)> = loci.into_iter().collect();
     work.sort_by(|left, right| left.0.cmp(&right.0));
-    let results = crate::parallel::try_map_ordered(work, cores, |(locus, sequences)| {
-        let raw = run_mafft(&mafft_bin, &sequences)
-            .with_context(|| format!("running mafft for locus {locus}"))?;
-        let aligned = if no_trim {
-            Some(raw)
-        } else {
-            trim_alignment_running(
-                &raw,
-                window,
-                proportion,
-                threshold,
-                max_divergence,
-                min_length,
-            )
-        };
-        match aligned {
-            Some(aln) => {
-                write_output(output, &locus, &aln)?;
-                Ok(false)
+    let results = crate::parallel::try_map_ordered_by_cost(
+        work,
+        cores,
+        |(_, sequences)| alignment_cost(sequences),
+        |(locus, sequences)| {
+            let raw = run_mafft(&mafft_bin, &sequences)
+                .with_context(|| format!("running mafft for locus {locus}"))?;
+            let aligned = if no_trim {
+                Some(raw)
+            } else {
+                trim_alignment_running(
+                    &raw,
+                    window,
+                    proportion,
+                    threshold,
+                    max_divergence,
+                    min_length,
+                )
+            };
+            match aligned {
+                Some(aln) => {
+                    write_output(output, &locus, &aln)?;
+                    Ok(false)
+                }
+                None => Ok(true),
             }
-            None => Ok(true),
-        }
-    })?;
+        },
+    )?;
     for &dropped in &results {
         print!("{}", if dropped { 'X' } else { '.' });
     }
@@ -119,4 +125,19 @@ fn write_output(output_dir: &Path, locus: &str, alignment: &Alignment) -> anyhow
     std::fs::write(&out_path, format_nexus(alignment))
         .with_context(|| format!("writing nexus output to {}", out_path.display()))?;
     Ok(())
+}
+
+/// Pairwise sequence work dominates many MAFFT jobs. This is a scheduling
+/// estimate only; MAFFT flags and the within-locus record order are unchanged.
+fn alignment_cost(sequences: &[(String, String)]) -> u128 {
+    let count = sequences.len() as u128;
+    let longest = sequences
+        .iter()
+        .map(|(_, sequence)| sequence.len())
+        .max()
+        .unwrap_or(0) as u128;
+    count
+        .saturating_mul(count)
+        .saturating_mul(longest)
+        .saturating_mul(longest)
 }

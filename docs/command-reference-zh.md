@@ -15,7 +15,7 @@
 | `align add-missing-data-designators` | `phyluce_align_add_missing_data_designators` | 给缺少某些 taxa 的 alignment 补上缺失标记；用 phyluce 的拼接工具时通常不需要单独跑这个。 |
 | `align concatenate-alignments` | `phyluce_align_concatenate_alignments` | 把一批 alignment 拼接成一个 NEXUS 或 PHYLIP 文件，附带 charset 信息。 |
 | `align convert-degen-bases` | `phyluce_align_convert_degen_bases` | 把 alignment 里的 IUPAC 简并碱基码统一转成 `N`。 |
-| `align convert-one-align-to-another` | `phyluce_align_convert_one_align_to_another` | 在 FASTA/NEXUS/PHYLIP/PHYLIP-relaxed/CLUSTAL/EMBOSS/Stockholm 之间自由转换格式。 |
+| `align convert-one-align-to-another` | `phyluce_align_convert_one_align_to_another` | 读取多种比对格式，输出 FASTA/NEXUS；支持 `--shorten-names` 自动缩写和 `--name-conf` 名称映射。 |
 | `align explode-alignments` | `phyluce_align_explode_alignments` | 把一个目录的 alignment "炸开"成按 taxon 或按 locus 拆分的独立文件。 |
 | `align extract-taxa-from-alignments` | `phyluce_align_extract_taxa_from_alignments` | 按指定 taxa 列表保留或剔除，生成新的 alignment 目录。 |
 | `align extract-taxon-fasta-from-alignments` | `phyluce_align_extract_taxon_fasta_from_alignments` | 从一批 alignment 里抽出某个 taxon 的数据，输出为 FASTA。 |

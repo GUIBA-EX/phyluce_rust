@@ -65,6 +65,7 @@ mod assemblo_spades_cmd;
 mod assemblo_velvet_cmd;
 mod bootrep_support_cmd;
 mod bootstrap_count_cmd;
+mod checkpoint;
 mod chunk_fasta_cmd;
 mod combine_reads_cmd;
 mod concatenate_cmd;
@@ -776,6 +777,15 @@ enum AssemblyAction {
         /// (Rust-only addition; the legacy CLI prompts interactively).
         #[arg(long, default_value_t = false)]
         force: bool,
+        /// Maximum concurrent samples (LASTZ processes and result parsing).
+        #[arg(long, default_value_t = 1)]
+        cores: usize,
+        /// Reuse LASTZ results only when input, binary, parameters and output hashes match.
+        #[arg(long, conflicts_with_all = ["force", "skip_alignment"])]
+        resume: bool,
+        /// Override the configured LASTZ executable.
+        #[arg(long, conflicts_with = "skip_alignment")]
+        lastz_binary: Option<PathBuf>,
     },
     /// Equivalent to `phyluce_assembly_get_match_counts`: generate a matrix
     /// config or optimize complete-matrix taxon membership.
@@ -1126,6 +1136,10 @@ enum AlignAction {
         nexus: bool,
         #[arg(long, default_value_t = false)]
         phylip: bool,
+        /// MiB budget for the matrix and cached alignments (excludes parser/metadata overhead).
+        /// Set to 0 to force disk-backed concatenation.
+        #[arg(long, default_value_t = 256)]
+        memory_limit_mb: usize,
     },
     /// Equivalent to `phyluce_align_add_missing_data_designators`. Output
     /// format is always NEXUS (the only format tested against a fixture;
@@ -1236,6 +1250,12 @@ enum AlignAction {
         output_format: String,
         #[arg(long, default_value_t = 1)]
         cores: usize,
+        /// Shorten taxon names consistently across all input alignments.
+        #[arg(long)]
+        shorten_names: bool,
+        /// Case-sensitive [taxa] full-name:short-name mappings (used with --shorten-names).
+        #[arg(long)]
+        name_conf: Option<PathBuf>,
     },
     /// Equivalent to `phyluce_align_get_gblocks_trimmed_alignments_from_untrimmed`.
     GetGblocksTrimmedAlignmentsFromUntrimmed {
@@ -2335,7 +2355,15 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             output,
             nexus,
             phylip,
-        } => concatenate_cmd::run(&alignments, &input_format, &output, nexus, phylip),
+            memory_limit_mb,
+        } => concatenate_cmd::run(
+            &alignments,
+            &input_format,
+            &output,
+            nexus,
+            phylip,
+            memory_limit_mb,
+        ),
         AlignAction::AddMissingDataDesignators {
             alignments,
             output,
@@ -2414,7 +2442,17 @@ fn run_align(action: AlignAction) -> anyhow::Result<()> {
             input_format,
             output_format,
             cores,
-        } => convert_cmd::run(&alignments, &output, &input_format, &output_format, cores),
+            shorten_names,
+            name_conf,
+        } => convert_cmd::run(
+            &alignments,
+            &output,
+            &input_format,
+            &output_format,
+            cores,
+            shorten_names,
+            name_conf.as_deref(),
+        ),
         AlignAction::GetGblocksTrimmedAlignmentsFromUntrimmed {
             alignments,
             output,
@@ -2711,6 +2749,9 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
             csv,
             skip_alignment,
             force,
+            cores,
+            resume,
+            lastz_binary,
         } => match_contigs::run(
             &contigs,
             &probes,
@@ -2723,6 +2764,9 @@ fn run_assembly(action: AssemblyAction) -> anyhow::Result<()> {
             csv,
             skip_alignment,
             force,
+            cores,
+            resume,
+            lastz_binary.as_deref(),
         ),
         AssemblyAction::GetMatchCounts {
             locus_db,

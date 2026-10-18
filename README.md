@@ -90,6 +90,29 @@ phyluce align convert-degen-bases --alignments in --output out
 | 2bit 解码 | 逐 base 查表改为逐字节查 256 项表 | ~3x（约 3.5 Gbases/秒） |
 | 编译配置与内存分配器 | LTO + `codegen-units=1`，改用 `mimalloc` | - |
 
+### 流程级优化与基准
+
+`assembly match-contigs-to-probes` 新增 `--cores N`（默认 1）进行有界样本
+并行，新增 `--resume` 校验并复用已完成的 LASTZ 结果。复用以输入、可执行
+文件、参数及输出内容指纹为依据；每次重新生成 SQLite 和报告。
+`get-fastas-from-match-counts` 和 FASTA 长度统计改为流式读取；提取输出使用
+缓冲写入。匹配数据库更新在每个样本事务内复用预编译 SQL 语句。
+
+2026-10-19 本地 release 基准（5 次运行中位数）：
+
+| 阶段 | 优化前 | 优化后 |
+| --- | --- | --- |
+| 提取峰值 RSS（250,000 条 × 1,000 bp，约 258 MB FASTA） | 300.7 MiB | 22.5 MiB |
+| 同一提取任务耗时 | 84.6 ms | 66.1 ms |
+| 匹配结果处理（64 样本 × 5,000 loci，单 worker） | 2.22 s | 1.46 s |
+
+这是合成数据、主要命中缓存的阶段测量，没有执行 LASTZ/MAFFT/组装器；结果
+处理的四 worker 测量为 1.51 s，未优于单 worker，默认并行度因此保持 1。
+输出 FASTA、SQLite 内容和 CSV 已核对一致。基准脚本见
+[tests/performance/benchmark_pipeline.py](tests/performance/benchmark_pipeline.py)，
+原始测量、二进制校验和及环境信息见
+[2026-10-19.json](tests/performance/results/2026-10-19.json)。
+
 ## 快速开始
 
 ```bash
@@ -110,6 +133,17 @@ phyluce probe get-full-probes \
 输入须为原版 probe FASTA，header 中包含 local/global 坐标，序列仅含 A/C/G/T。
 命令按坐标拼接重叠 probe，每组保留最长有效连续序列，并在输出目录中为每个
 locus 写一个 FASTA 文件。输出目录须不存在或为空。不使用 MUSCLE 或 MAFFT。
+
+## 比对与拼接性能
+
+MAFFT 多进程任务优先调度估算工作量较大的 locus，保留原有比对参数和输出顺序。
+矩阵拼接从缓存的序列片段直接输出，避免缓存与完整矩阵同时驻留；默认提供
+256 MiB 的矩阵或输入缓存预算；`--memory-limit-mb 0` 可强制
+使用低内存磁盘路径。超出缓存预算后转存二进制临时快照，避免重新解析原始输入；
+磁盘路径直接读取快照输出，不再构建完整磁盘矩阵。临时文件只保存实际序列，
+片段索引驻留内存；预算不是进程总内存上限。
+
+实测结果及复现方式见 [比对与拼接性能测试](tests/performance/README.md)。
 
 ## 开发检查
 

@@ -1,6 +1,6 @@
 //! MAFFT wrapper mirroring `phyluce/mafft.py`'s `Align.run_alignment`.
 
-use std::io::Write as _;
+use std::io::{BufWriter, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -77,11 +77,14 @@ pub enum MafftError {
 /// several downstream commands strip it explicitly when they need to).
 pub fn run_mafft(mafft_bin: &str, records: &[(String, String)]) -> Result<Alignment, MafftError> {
     let mut input = UniqueTempFile::new()?;
-    for (id, seq) in records {
-        writeln!(input, ">{id}")?;
-        writeln!(input, "{seq}")?;
+    {
+        let mut buffered = BufWriter::new(&mut input);
+        for (id, seq) in records {
+            writeln!(buffered, ">{id}")?;
+            writeln!(buffered, "{seq}")?;
+        }
+        buffered.flush()?;
     }
-    input.flush()?;
 
     let report = ExternalCommand::new(mafft_bin)
         .args([

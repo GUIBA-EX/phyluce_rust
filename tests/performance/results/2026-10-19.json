@@ -1,0 +1,296 @@
+{
+  "extraction": {
+    "baseline": {
+      "median_wall_seconds": 0.08456105808727443,
+      "median_max_rss_kib": 307904,
+      "runs": [
+        {
+          "wall_seconds": 0.08515900396741927,
+          "user_seconds": 0.02,
+          "system_seconds": 0.05,
+          "max_rss_kib": 307720,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "baseline"
+        },
+        {
+          "wall_seconds": 0.08456105808727443,
+          "user_seconds": 0.04,
+          "system_seconds": 0.03,
+          "max_rss_kib": 307912,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "baseline"
+        },
+        {
+          "wall_seconds": 0.08459931099787354,
+          "user_seconds": 0.05,
+          "system_seconds": 0.03,
+          "max_rss_kib": 307680,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "baseline"
+        },
+        {
+          "wall_seconds": 0.08414635783992708,
+          "user_seconds": 0.04,
+          "system_seconds": 0.03,
+          "max_rss_kib": 307904,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "baseline"
+        },
+        {
+          "wall_seconds": 0.08292649709619582,
+          "user_seconds": 0.03,
+          "system_seconds": 0.04,
+          "max_rss_kib": 307952,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "baseline"
+        }
+      ]
+    },
+    "candidate": {
+      "median_wall_seconds": 0.06610903586260974,
+      "median_max_rss_kib": 23072,
+      "runs": [
+        {
+          "wall_seconds": 0.06618084805086255,
+          "user_seconds": 0.03,
+          "system_seconds": 0.02,
+          "max_rss_kib": 23076,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "candidate"
+        },
+        {
+          "wall_seconds": 0.066510661970824,
+          "user_seconds": 0.04,
+          "system_seconds": 0.02,
+          "max_rss_kib": 23072,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "candidate"
+        },
+        {
+          "wall_seconds": 0.06607224489562213,
+          "user_seconds": 0.04,
+          "system_seconds": 0.01,
+          "max_rss_kib": 22960,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "candidate"
+        },
+        {
+          "wall_seconds": 0.06609371700324118,
+          "user_seconds": 0.05,
+          "system_seconds": 0.01,
+          "max_rss_kib": 23008,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "candidate"
+        },
+        {
+          "wall_seconds": 0.06610903586260974,
+          "user_seconds": 0.04,
+          "system_seconds": 0.02,
+          "max_rss_kib": 23160,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 416,
+          "variant": "candidate"
+        }
+      ]
+    }
+  },
+  "match_result_processing": {
+    "baseline-cores-1": {
+      "median_wall_seconds": 2.2217567642219365,
+      "median_max_rss_kib": 35324,
+      "runs": [
+        {
+          "wall_seconds": 2.2198648790363222,
+          "user_seconds": 1.79,
+          "system_seconds": 0.2,
+          "max_rss_kib": 35324,
+          "filesystem_inputs": 8,
+          "filesystem_outputs": 867616,
+          "variant": "baseline",
+          "cores": 1
+        },
+        {
+          "wall_seconds": 2.2217567642219365,
+          "user_seconds": 1.76,
+          "system_seconds": 0.23,
+          "max_rss_kib": 35368,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 865720,
+          "variant": "baseline",
+          "cores": 1
+        },
+        {
+          "wall_seconds": 2.2119275950826705,
+          "user_seconds": 1.77,
+          "system_seconds": 0.24,
+          "max_rss_kib": 35024,
+          "filesystem_inputs": 8,
+          "filesystem_outputs": 865496,
+          "variant": "baseline",
+          "cores": 1
+        },
+        {
+          "wall_seconds": 2.2292283149436116,
+          "user_seconds": 1.8,
+          "system_seconds": 0.22,
+          "max_rss_kib": 35232,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 867536,
+          "variant": "baseline",
+          "cores": 1
+        },
+        {
+          "wall_seconds": 2.247656703926623,
+          "user_seconds": 1.8,
+          "system_seconds": 0.22,
+          "max_rss_kib": 35424,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 864880,
+          "variant": "baseline",
+          "cores": 1
+        }
+      ]
+    },
+    "candidate-cores-1": {
+      "median_wall_seconds": 1.4637239940930158,
+      "median_max_rss_kib": 31348,
+      "runs": [
+        {
+          "wall_seconds": 1.4778195389080793,
+          "user_seconds": 1.02,
+          "system_seconds": 0.23,
+          "max_rss_kib": 31584,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 866048,
+          "variant": "candidate",
+          "cores": 1
+        },
+        {
+          "wall_seconds": 1.4578885140363127,
+          "user_seconds": 1.03,
+          "system_seconds": 0.21,
+          "max_rss_kib": 31020,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 867544,
+          "variant": "candidate",
+          "cores": 1
+        },
+        {
+          "wall_seconds": 1.459986865054816,
+          "user_seconds": 1.01,
+          "system_seconds": 0.23,
+          "max_rss_kib": 31348,
+          "filesystem_inputs": 8,
+          "filesystem_outputs": 869000,
+          "variant": "candidate",
+          "cores": 1
+        },
+        {
+          "wall_seconds": 1.4637239940930158,
+          "user_seconds": 1.03,
+          "system_seconds": 0.2,
+          "max_rss_kib": 31252,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 866912,
+          "variant": "candidate",
+          "cores": 1
+        },
+        {
+          "wall_seconds": 1.4706628730054945,
+          "user_seconds": 1.02,
+          "system_seconds": 0.23,
+          "max_rss_kib": 31360,
+          "filesystem_inputs": 8,
+          "filesystem_outputs": 866552,
+          "variant": "candidate",
+          "cores": 1
+        }
+      ]
+    },
+    "candidate-cores-4": {
+      "median_wall_seconds": 1.5066381241194904,
+      "median_max_rss_kib": 99240,
+      "runs": [
+        {
+          "wall_seconds": 1.4989431858994067,
+          "user_seconds": 1.26,
+          "system_seconds": 0.25,
+          "max_rss_kib": 103292,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 866608,
+          "variant": "candidate",
+          "cores": 4
+        },
+        {
+          "wall_seconds": 1.5112528738100082,
+          "user_seconds": 1.26,
+          "system_seconds": 0.25,
+          "max_rss_kib": 99240,
+          "filesystem_inputs": 8,
+          "filesystem_outputs": 866512,
+          "variant": "candidate",
+          "cores": 4
+        },
+        {
+          "wall_seconds": 1.5137908330652863,
+          "user_seconds": 1.23,
+          "system_seconds": 0.26,
+          "max_rss_kib": 99228,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 866088,
+          "variant": "candidate",
+          "cores": 4
+        },
+        {
+          "wall_seconds": 1.4951180119533092,
+          "user_seconds": 1.24,
+          "system_seconds": 0.26,
+          "max_rss_kib": 90860,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 868888,
+          "variant": "candidate",
+          "cores": 4
+        },
+        {
+          "wall_seconds": 1.5066381241194904,
+          "user_seconds": 1.26,
+          "system_seconds": 0.24,
+          "max_rss_kib": 101328,
+          "filesystem_inputs": 0,
+          "filesystem_outputs": 868208,
+          "variant": "candidate",
+          "cores": 4
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "platform": "Linux-7.0.0-34-generic-x86_64-with-glibc2.39",
+    "settings": {
+      "baseline": "/tmp/phyluce-before-performance",
+      "candidate": "target/release/phyluce",
+      "output": "/tmp/phyluce-performance-final.json",
+      "records": 250000,
+      "length": 1000,
+      "samples": 64,
+      "loci": 5000,
+      "cores": 4,
+      "repeats": 5
+    },
+    "extraction_input_bytes": 258388890,
+    "binary_sha256": {
+      "baseline": "c2f445dc238309e495df33ccbf1eff13792bed88431af3feda63d970fd03bd29",
+      "candidate": "db56e9db5a3c006f77fa0c7e44c8ad3e8085a0bac58ecaa8623e6ea003ce2d37"
+    },
+    "notes": "Synthetic warm-cache stage measurements; LASTZ is NOT executed. Outputs verified equivalent."
+  }
+}

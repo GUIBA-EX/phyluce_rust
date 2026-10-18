@@ -379,6 +379,9 @@ phyluce assembly match-contigs-to-probes \
 | `--csv` | 写出每个 taxon 的匹配摘要 |
 | `--skip-alignment` | Rust 增加项：复用已有 `.lastz`，不调用 LASTZ |
 | `--force` | Rust 增加项：输出目录已存在时删除并重建 |
+| `--cores` | 最大并行样本数，默认 1；同时限制 LASTZ 进程数 |
+| `--resume` | 校验并复用已完成的 LASTZ 结果；首次运行也可使用 |
+| `--lastz-binary` | 显式指定 LASTZ 可执行文件，覆盖配置路径 |
 
 输出：
 
@@ -395,6 +398,34 @@ locus 命中同一样本的多个 contig，或一个 contig 对应多个 locus �
 当作多个独立 UCE 使用。应检查 `--dupefile`、重复命中输出和样本间回收量差异；
 异常偏高可能来自重复序列或阈值过宽，异常偏低则可能反映数据质量、组装质量、
 探针距离或命名问题。
+
+多样本并行与断点恢复示例：
+
+```bash
+phyluce assembly match-contigs-to-probes \
+  --contigs assembly-spades/contigs \
+  --probes uce-5k-probes.fasta \
+  --output uce-search \
+  --cores 4 --resume \
+  --csv uce-search/probe_match_results.csv
+```
+
+首次加 `--resume` 会为成功解析的样本写入 `<sample>.lastz.complete`。
+再次运行相同命令时，只有 contigs、probes、LASTZ 可执行文件内容、路径、
+coverage/identity 参数及 `.lastz` 输出的 BLAKE3 校验均匹配才跳过 LASTZ。
+输入改变、输出损坏、标记缺失或损坏时仅重新执行受影响的样本；参数、probes
+或可执行文件改变通常影响全部样本。每次仍重新解析结果、应用当前筛选条件，
+重建数据库与报告。旧运行仅有 `.lastz` 而没有标记时不会自动认定可复用。
+
+`--resume` 不能与 `--force` 或 `--skip-alignment` 同用。`--skip-alignment`
+是显式信任已有结果的独立模式，不做上述缓存有效性判断。断点恢复会增加内容
+校验的读盘成本；它适合避免重复运行昂贵的 LASTZ 计算。运行期间请保持输入和
+外部程序不变。
+
+任务按有界批次并行，最多保留两倍 worker 数的待汇总结果，数据库和报告按
+排序后的样本顺序写出。并行度越高，外部程序和每个样本匹配集合的内存占用也
+越高；此参数限制任务数量，不是内存字节上限。LASTZ 成功退出后才原子替换
+目标 `.lastz`；进程失败不会将半写入结果标记为完成。
 
 ### 6.4 生成 complete 或 incomplete matrix 的 locus 列表
 
@@ -595,6 +626,10 @@ phyluce align seqcap-align \
 ```
 
 注意：当前实现使用 MAFFT；`--aligner muscle` 尚未实现为 CLI 参数。
+`seqcap-align` 在 `--cores > 1` 时按序列数量和最长序列长度估算任务量，优先启动
+较重的 locus，减少末尾等待；结果汇报仍按 locus 名称顺序。MAFFT 参数及每个 locus
+内的序列顺序保持不变。输入 FASTA 逐条读取后按 locus 分组，全部分组仍保存在内存中。
+
 `seqcap-align` 无论是否启用修剪都写出 NEXUS。下一节的命令专用于已有的 FASTA
 alignment 目录，不能直接读取这里生成的 NEXUS；如需这样串联，应先转换为 FASTA。
 
@@ -682,6 +717,23 @@ phyluce align convert-one-align-to-another \
 
 输入支持 FASTA、NEXUS、PHYLIP（含 relaxed/sequential）、CLUSTAL、EMBOSS
 和 Stockholm；该转换命令当前仅输出 FASTA 或 NEXUS，不支持的格式会明确报错。
+
+增加 `--shorten-names` 可自动缩写 taxon 名称，例如 `Homo_sapiens` →
+`HomSap`。依次优先使用 `-`、`_`、空格分隔名称，取前两部分各前三个字符并
+转为首字母大写；无分隔符时保留前六个字符。映射覆盖全部输入文件，按原名
+排序生成，重名依次追加 `0`、`1` 等后缀，因此并行与串行输出一致。
+
+自定义映射时同时传入 `--shorten-names --name-conf names.conf`：
+
+```ini
+[taxa]
+Homo_sapiens: HS
+Pan_troglodytes: PT
+```
+
+名称区分大小写，配置必须覆盖所有输入 taxon；短名称必须非空、不含空白且
+不能重复。配置错误会在创建输出目录前报告。单独传入 `--name-conf` 不启用
+重命名，与原版一致。使用 `--log-path` 时日志记录名称映射。
 
 ### 7.6 转换 IUPAC degenerate bases
 
@@ -794,8 +846,21 @@ phyluce align concatenate-alignments \
   --phylip
 ```
 
-拼接过程分两遍读取 locus，并使用自动清理的磁盘暂存矩阵；峰值内存主要由单个
-locus 决定，而不是全部输入和完整拼接矩阵之和。
+拼接默认使用 `--memory-limit-mb 256`：预算足够时缓存输入，按 taxon 直接读取
+各 locus 的序列片段并写出，缺失位置即时补 `?`，不再同时分配完整矩阵。
+每个 locus 解析后立即将名称替换为全局 taxon 编号，并将序列合并为一个连续
+缓冲区，减少重复名称、逐条序列分配和缓存转换时的内存重叠。缓存预算也计入
+后续输出片段索引的估算大小。
+缓存放不下时将已有缓存转存为紧凑的二进制临时快照，后续 locus 解析后直接
+追加，原始输入只解析一次。完整矩阵能放进预算时按快照顺序读入内存；否则
+直接按 taxon 索引读取磁盘快照并写出，不再构建完整磁盘矩阵，也不进行矩阵
+随机写入。临时文件只包含实际序列，缺失位置不占临时磁盘空间。
+设置 `--memory-limit-mb 0` 从首个 locus 开始使用磁盘快照，序列不整体驻内存，
+但仍需在内存中维护每条序列的起点、长度和文件偏移索引。索引在 64 位平台上
+每项为 24 字节，另有容器容量开销。输出结束或出错时自动删除快照。
+预算覆盖矩阵及输入缓存的估算分配量，不包含解析器、磁盘片段索引、taxon/charset
+元数据和分配器保留内存，因此不是进程 RSS 的硬上限。
+两种路径保持 taxon 顺序、缺失字符、分区坐标及输出格式一致。
 
 PHYLIP 输出同时生成 charset 信息，记录每个 locus 在拼接矩阵中的字符范围，可
 作为 IQ-TREE、RAxML 等分区配置的依据；是否需要转换格式取决于下游软件版本和
@@ -1697,8 +1762,32 @@ lastz --version
 `--cores` 控制支持并行的命令，但最优值不一定等于机器全部逻辑核心。MAFFT、
 LASTZ、组装器和文件级并行可能同时消耗 CPU、内存与文件句柄；先用少量样本观察
 资源占用，再增加核心数。多 genome LASTZ 任务使用全局有界任务队列，拼接使用
-两遍读取和磁盘暂存，因此还应确保输入文件在运行期间不被修改，并为系统临时
+单次解析和磁盘快照，因此还应确保输入文件在运行期间不被修改，并为系统临时
 目录（通常由 `TMPDIR` 决定）保留足够空间。
+
+### 19.1 流式提取与性能验证
+
+`get-fastas-from-match-counts` 逐条读取 plain/gzip FASTA，序列存储随单条
+contig 大小增长，而非随整个文件大小增长；FASTA 和缺失 locus 报告使用缓冲
+写入。即使目标已经全部找到，也会继续读取并检查尾部 UTF-8、I/O 和 gzip
+错误。`get-fasta-lengths` 同样使用流式记录读取，仅保存长度列表。
+
+开发者可使用 `tests/performance/benchmark_pipeline.py` 比较两个 release
+二进制。它生成固定的合成数据，分别记录提取与已有 LASTZ 结果处理的墙钟时间、
+用户/内核 CPU 时间、峰值 RSS 及 GNU time 的文件系统 I/O 计数，并检查 FASTA、
+SQLite 内容及 CSV 一致。I/O 计数不是应用层字节数，缓存命中时可为零。
+
+```bash
+python3 tests/performance/benchmark_pipeline.py \
+  --baseline /path/to/baseline/phyluce \
+  --candidate target/release/phyluce \
+  --samples 64 --loci 5000 --cores 4 --repeats 5 \
+  --output benchmark.json
+```
+
+需要 Linux GNU time。脚本交替运行两个版本，不清除操作系统缓存；结果是
+合成数据的阶段基准，未运行 LASTZ、MAFFT 或组装器，不能视作真实生物数据的
+端到端加速比。LASTZ 进程调用与恢复的回归测试另使用真实结果夹具和受控替身。
 
 ## 20. 引用、许可证与问题报告
 

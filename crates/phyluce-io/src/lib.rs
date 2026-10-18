@@ -107,14 +107,92 @@ pub fn read_fasta_reader(mut reader: impl BufRead) -> Result<Vec<FastaRecord>, F
     Ok(records)
 }
 
+/// Read one record at a time, retaining only the current sequence and a header
+/// of lookahead. Consuming to EOF also checks trailing I/O/UTF-8/gzip errors.
+pub struct FastaReader<R> {
+    reader: R,
+    line: String,
+    line_number: usize,
+    current: Option<FastaRecord>,
+    finished: bool,
+    seen_header: bool,
+}
+
+impl<R: BufRead> FastaReader<R> {
+    pub fn new(reader: R) -> Self {
+        Self {
+            reader,
+            line: String::new(),
+            line_number: 0,
+            current: None,
+            finished: false,
+            seen_header: false,
+        }
+    }
+}
+
+impl<R: BufRead> Iterator for FastaReader<R> {
+    type Item = Result<FastaRecord, FastaError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        loop {
+            self.line.clear();
+            match self.reader.read_line(&mut self.line) {
+                Ok(0) => {
+                    self.finished = true;
+                    return self
+                        .current
+                        .take()
+                        .map(Ok)
+                        .or_else(|| (!self.seen_header).then_some(Err(FastaError::Empty)));
+                }
+                Ok(_) => self.line_number += 1,
+                Err(error) => {
+                    self.finished = true;
+                    return Some(Err(error.into()));
+                }
+            }
+            let trimmed = self.line.trim_end_matches(['\n', '\r']);
+            if let Some(header) = trimmed.strip_prefix('>') {
+                self.seen_header = true;
+                let previous = self.current.replace(FastaRecord {
+                    id: header.split_whitespace().next().unwrap_or("").to_string(),
+                    description: header.to_string(),
+                    sequence: String::new(),
+                });
+                if let Some(record) = previous {
+                    return Some(Ok(record));
+                }
+            } else if !trimmed.trim().is_empty() {
+                if let Some(record) = &mut self.current {
+                    record.sequence.push_str(trimmed.trim());
+                } else {
+                    self.finished = true;
+                    return Some(Err(FastaError::DataBeforeHeader {
+                        line: self.line_number,
+                    }));
+                }
+            }
+        }
+    }
+}
+
+impl<R: BufRead> std::iter::FusedIterator for FastaReader<R> {}
+
+pub fn iter_fasta(path: &Path) -> Result<FastaReader<Box<dyn BufRead>>, FastaError> {
+    Ok(FastaReader::new(open_maybe_gz(path)?))
+}
+
 /// Per-record sequence lengths, mirroring the legacy `fasta_iter` generator
 /// used by `phyluce_assembly_get_fasta_lengths` (sum of stripped sequence
 /// line lengths following each header line).
 pub fn fasta_lengths(path: &Path) -> Result<Vec<usize>, FastaError> {
-    Ok(read_fasta(path)?
-        .into_iter()
-        .map(|r| r.sequence.len())
-        .collect())
+    iter_fasta(path)?
+        .map(|record| record.map(|r| r.sequence.len()))
+        .collect()
 }
 
 /// Validation issue found while checking a FASTA file's structure.
@@ -360,5 +438,53 @@ mod tests {
         let path = write_temp("clean.fasta", ">a\nACGT\n>b\nACGT\n");
         let issues = validate_fasta(&path).unwrap();
         assert!(issues.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn streaming_matches_bulk_records_and_errors() {
+        for text in [
+            ">a description\r\n AC GT \r\n\n>b\n>c\nacgt",
+            ">\n",
+            "\n>a\nA\n",
+        ] {
+            let bulk = read_fasta_reader(Cursor::new(text)).unwrap();
+            let stream = FastaReader::new(Cursor::new(text))
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(bulk, stream);
+        }
+        for text in ["", "\n \n", "ACGT\n>a\nA"] {
+            let bulk = read_fasta_reader(Cursor::new(text))
+                .unwrap_err()
+                .to_string();
+            let stream = FastaReader::new(Cursor::new(text))
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap_err()
+                .to_string();
+            assert_eq!(bulk, stream);
+        }
+    }
+
+    #[test]
+    fn trailing_read_error_is_reported_and_iterator_is_fused() {
+        let mut stream = FastaReader::new(Cursor::new(b">a\nACGT\n>b\n\xff"));
+        assert_eq!(stream.next().unwrap().unwrap().id, "a");
+        assert!(matches!(stream.next(), Some(Err(FastaError::Io(_)))));
+        assert!(stream.next().is_none());
+        assert!(stream.next().is_none());
+    }
+
+    #[test]
+    fn iterator_does_not_read_later_sequences_to_yield_first_record() {
+        let input = b">a\nACGT\n>b\nCCCC\n>c\nTTTT\n";
+        let mut stream = FastaReader::new(Cursor::new(input));
+        assert_eq!(stream.next().unwrap().unwrap().sequence, "ACGT");
+        assert_eq!(stream.reader.position(), 11);
     }
 }
